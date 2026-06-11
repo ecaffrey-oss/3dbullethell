@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bullet Hell 3D</title>
+  </head>
+  <body>
+    <div id="hud">
+      <div id="stats">
+        <span id="room-label">Room 1</span>
+        <span id="health-label">♥ ♥ ♥</span>
+        <span id="score-label">Score: 0</span>
+      </div>
+      <div id="message" class="hidden"></div>
+      <div id="boss-hud" class="hidden">
+        <div id="boss-name">BOSS</div>
+        <div id="boss-phase">Phase 1</div>
+        <div id="boss-bar-track">
+          <div id="boss-bar-fill"></div>
+        </div>
+      </div>
+      <div id="controls">
+        WASD / Arrows — Move &nbsp;|&nbsp; Mouse — Aim &nbsp;|&nbsp; Hold Click / Space — Shoot
+      </div>
+    </div>
+    <canvas id="game"></canvas>
+    <div id="overlay" class="hidden">
+      <div id="overlay-content">
+        <h1 id="overlay-title">Bullet Hell 3D</h1>
+        <p id="overlay-text">Survive each room. Destroy all enemies. Don't get hit.</p>
+        <button id="start-btn">Start Game</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
