@@ -1,116 +1,353 @@
-import { Enemy } from "./Enemy.js";
+import { Enemy, getEnemyPoolForStage, maybeRollChairType } from "./Enemy.js";
 import { Boss } from "./Boss.js";
-import { ARENA_SIZE } from "./constants.js";
-
-const ROOM_LAYOUTS = [
-  // Room 1 — intro
-  [
-    { type: "grunt", x: -4, z: -2 },
-    { type: "grunt", x: 4, z: -2 },
-    { type: "grunt", x: 0, z: -6 },
-  ],
-  // Room 2
-  [
-    { type: "grunt", x: -5, z: -4 },
-    { type: "grunt", x: 5, z: -4 },
-    { type: "grunt", x: 0, z: -7 },
-    { type: "turret", x: 0, z: -2 },
-  ],
-  // Room 3
-  [
-    { type: "turret", x: -4, z: -3 },
-    { type: "turret", x: 4, z: -3 },
-    { type: "spinner", x: 0, z: -6 },
-    { type: "grunt", x: -3, z: -7 },
-    { type: "grunt", x: 3, z: -7 },
-  ],
-  // Room 4
-  [
-    { type: "spinner", x: -5, z: -4 },
-    { type: "spinner", x: 5, z: -4 },
-    { type: "turret", x: 0, z: -2 },
-    { type: "grunt", x: -2, z: -7 },
-    { type: "grunt", x: 2, z: -7 },
-    { type: "grunt", x: 0, z: -9 },
-  ],
-  // Room 5 — boss
-  [{ type: "boss", x: 0, z: -6 }],
-];
-
-function generateEndlessRoom(index) {
-  const count = 4 + Math.floor(index / 2);
-  const enemies = [];
-  const half = ARENA_SIZE / 2 - 3;
-
-  for (let i = 0; i < count; i++) {
-    const types = ["grunt", "turret", "spinner"];
-    const type = types[Math.floor(Math.random() * types.length)];
-    enemies.push({
-      type,
-      x: (Math.random() * 2 - 1) * half,
-      z: -2 - Math.random() * (half - 2),
-    });
-  }
-  return enemies;
-}
+import { Arena, ROOM_SIZES } from "./Arena.js";
+import { PATH_TYPES } from "./PathUI.js";
+import { MapSystem } from "./MapSystem.js";
 
 export class RoomManager {
-  constructor(scene) {
+  constructor(scene, arena) {
     this.scene = scene;
-    this.currentRoom = 0;
+    this.arena = arena;
+    this.map = new MapSystem();
+    this.floorsCleared = 0;
     this.enemies = [];
-    this.state = "fighting"; // fighting | clearing | transitioning
+    this.state = "fighting";
     this.transitionTimer = 0;
+    this.bossIntroTimer = 0;
+    this.isBossRoom = false;
+    this.currentRoomType = PATH_TYPES.COMBAT;
+    this.roomsSinceBoss = 0;
+    this.nextBossIn = 5 + Math.floor(Math.random() * 6);
+    this.onBossDefeated = null;
+    this.onRoomCleared = null;
+    this.onPathChoice = null;
+    this.onMinibossDrop = null;
+    this.onShopOpen = null;
+    this.onMinigameStart = null;
+    this.onChanceRoomStart = null;
+    this.onRoomReady = null;
+    this.bossDefeatsThisRun = 0;
+    this.pendingBoss = false;
+    this.hazardSystem = null;
+    this.arenaHazards = null;
+    this.roomScoreMultiplier = 1;
+    this.restHealed = false;
+    this.chanceOutcome = null;
+    this.bonusOutcome = null;
+    this.challengeMods = null;
+  }
+
+  get scaledEnemyFireMult() {
+    return this.enemyFireMult * (this.challengeMods?.enemyFireMult ?? 1);
+  }
+
+  setChallengeMods(mods) {
+    this.challengeMods = mods;
   }
 
   get roomNumber() {
-    return this.currentRoom + 1;
+    return this.floorsCleared + 1;
   }
 
-  spawnRoom() {
+  get healthScale() {
+    return 1 + this.floorsCleared * 0.28;
+  }
+
+  get enemyFireMult() {
+    return 1 + Math.floor(this.floorsCleared / 3) * 0.12;
+  }
+
+  get bonusEnemyCount() {
+    return this.bossDefeatsThisRun;
+  }
+
+  _spawnEnemy(type, x, z, scale) {
+    const finalType = maybeRollChairType(type);
+    this.enemies.push(new Enemy(this.scene, finalType, x, z, scale));
+  }
+
+  reset() {
+    this.map.reset();
+    this.floorsCleared = 0;
+    this.enemies = [];
+    this.state = "fighting";
+    this.transitionTimer = 0;
+    this.bossIntroTimer = 0;
+    this.isBossRoom = false;
+    this.currentRoomType = PATH_TYPES.COMBAT;
+    this.roomsSinceBoss = 0;
+    this.nextBossIn = 5 + Math.floor(Math.random() * 6);
+    this.bossDefeatsThisRun = 0;
+    this.pendingBoss = false;
+    this.roomScoreMultiplier = 1;
+    this.restHealed = false;
+    this.chanceOutcome = null;
+    this.bonusOutcome = null;
+    this.challengeMods = null;
+    this.arenaHazards?.clear();
     this.clearEnemies();
+    this.spawnIntroRoom();
+  }
 
-    const layout =
-      this.currentRoom < ROOM_LAYOUTS.length
-        ? ROOM_LAYOUTS[this.currentRoom]
-        : generateEndlessRoom(this.currentRoom - ROOM_LAYOUTS.length);
+  _buildArenaHazards(intensity = 1) {
+    this.arenaHazards?.build(this.arena, intensity);
+  }
 
-    for (const spec of layout) {
-      if (spec.type === "boss") {
-        this.enemies.push(new Boss(this.scene, spec.x, spec.z));
-      } else {
-        this.enemies.push(new Enemy(this.scene, spec.type, spec.x, spec.z));
+  _positionPlayerSouth() {
+    this.onRoomReady?.();
+  }
+
+  spawnIntroRoom() {
+    this.clearEnemies();
+    this.isBossRoom = false;
+    this.currentRoomType = PATH_TYPES.COMBAT;
+    this.roomScoreMultiplier = 1;
+    this.arena.build(ROOM_SIZES.medium, "square");
+    this._buildArenaHazards(0.3);
+
+    for (let i = 0; i < 3; i++) {
+      const p = this.arena.randomEnemyPoint();
+      this._spawnEnemy("grunt", p.x, p.z, this.healthScale);
+    }
+    this.state = "fighting";
+    this._positionPlayerSouth();
+  }
+
+  _spawnCombatEnemies(scaleMult = 1, extra = 0) {
+    const pool = getEnemyPoolForStage(this.floorsCleared);
+    let count = 3 + Math.floor(this.floorsCleared / 2) + extra + this.bonusEnemyCount;
+    count = Math.max(1, Math.round(count * (this.challengeMods?.enemyCountMult ?? 1)));
+    const scale = this.healthScale * scaleMult * (this.challengeMods?.enemyHealthMult ?? 1);
+    for (let i = 0; i < count; i++) {
+      let t = pool[Math.floor(Math.random() * pool.length)];
+      if (this.challengeMods?.eliteBias && this.floorsCleared >= 2 && Math.random() < 0.2) {
+        t = "elite";
       }
+      const p = this.arena.randomEnemyPoint();
+      this._spawnEnemy(t, p.x, p.z, scale);
+    }
+    if (this.floorsCleared >= 2 && Math.random() < 0.35) {
+      const p = this.arena.randomEnemyPoint();
+      this._spawnEnemy("skater", p.x, p.z, scale);
+    }
+  }
+
+  spawnRoom(type) {
+    this.clearEnemies();
+    this.hazardSystem?.clear();
+    this.arenaHazards?.clear();
+    this.chanceOutcome = null;
+    this.bonusOutcome = null;
+    this.currentRoomType = type;
+    this.isBossRoom = type === PATH_TYPES.BOSS;
+    this.roomScoreMultiplier = type === PATH_TYPES.HARD ? 2 : 1;
+    this.restHealed = false;
+
+    const size = this.arena.pickRandomSize();
+    const shape = this.arena.pickRandomShape();
+    this.arena.build(size, shape);
+
+    if (type === PATH_TYPES.BOSS) {
+      const variant = ["stalker", "orbiter", "dasher"][Math.floor(Math.random() * 3)];
+      const p = this.arena.randomEnemyPoint();
+      this.enemies.push(new Boss(this.scene, p.x, p.z, variant, this.bossDefeatsThisRun > 0));
+      this.bossIntroTimer = 2.5;
+      this._buildArenaHazards(1.2);
+    } else if (type === PATH_TYPES.MINIBOSS) {
+      const pool = getEnemyPoolForStage(this.floorsCleared);
+      for (let i = 0; i < 2; i++) {
+        const t = pool[Math.floor(Math.random() * pool.length)];
+        const p = this.arena.randomEnemyPoint();
+        this._spawnEnemy(t, p.x, p.z, this.healthScale);
+      }
+      const elitePt = this.arena.randomEnemyPoint();
+      this.enemies.push(new Enemy(this.scene, "elite", elitePt.x, elitePt.z, this.healthScale * 1.3));
+      this._buildArenaHazards(1);
+    } else if (type === PATH_TYPES.HARD) {
+      this._spawnCombatEnemies(1.35, +2);
+      this._buildArenaHazards(1.2);
+    } else if (type === PATH_TYPES.COMBAT) {
+      this._spawnCombatEnemies(1, 0);
+      this._buildArenaHazards(0.8);
     }
 
     this.state = "fighting";
+    this._positionPlayerSouth();
+  }
+
+  spawnRestRoom(player) {
+    this.clearEnemies();
+    this.hazardSystem?.clear();
+    this.arenaHazards?.clear();
+    this.currentRoomType = PATH_TYPES.REST;
+    this.isBossRoom = false;
+    this.roomScoreMultiplier = 1;
+    this.restHealed = false;
+    this.arena.build(ROOM_SIZES.medium, "circle");
+    this._buildArenaHazards(0);
+    this._player = player;
+    this.state = "minigame";
+    this._positionPlayerSouth();
+    this.onMinigameStart?.("rest");
+  }
+
+  spawnChanceRoom() {
+    this.clearEnemies();
+    this.hazardSystem?.clear();
+    this.arenaHazards?.clear();
+    this.currentRoomType = PATH_TYPES.CHANCE;
+    this.isBossRoom = false;
+    this.roomScoreMultiplier = 1;
+    this.chanceOutcome = null;
+    this.arena.build(ROOM_SIZES.medium, "hourglass");
+    this._buildArenaHazards(0);
+    this.state = "chance";
+    this._positionPlayerSouth();
+    this.onChanceRoomStart?.();
+  }
+
+  finishChanceRoom(result) {
+    this.chanceOutcome = result?.outcome ?? null;
+    this.onRoomCleared?.(this.floorsCleared + 1, 0);
+    this.floorsCleared++;
+    this.roomsSinceBoss++;
+    this.state = "clearing";
+    this.transitionTimer = 1.4;
+  }
+
+  spawnMinigameRoom() {
+    this.clearEnemies();
+    this.hazardSystem?.clear();
+    this.arenaHazards?.clear();
+    this.currentRoomType = PATH_TYPES.MINIGAME;
+    this.isBossRoom = false;
+    this.roomScoreMultiplier = 1;
+    this.bonusOutcome = null;
+    this.arena.build(ROOM_SIZES.medium, "square");
+    this._buildArenaHazards(0);
+    this.state = "minigame";
+    this._positionPlayerSouth();
+    this.onMinigameStart?.("bonus");
+  }
+
+  finishBonusRoom(result) {
+    this.bonusOutcome = result?.failed ? "failed" : (result?.outcome ?? null);
+    const scoreBonus = result?.outcome === "score" ? 500 : 0;
+    this.onRoomCleared?.(this.floorsCleared + 1, scoreBonus);
+    this.floorsCleared++;
+    this.roomsSinceBoss++;
+    this.state = "clearing";
+    this.transitionTimer = 1.4;
+  }
+
+  finishMinigame(result) {
+    if (this.currentRoomType === PATH_TYPES.REST) {
+      if (result.healed && this._player) {
+        this._player.health = Math.min(this._player.maxHealth, this._player.health + 1);
+        this.restHealed = true;
+      }
+      this.state = "clearing";
+      this.transitionTimer = 1.2;
+      return;
+    }
+  }
+
+  enterShop() {
+    this.state = "shop";
+    this.onShopOpen?.();
+  }
+
+  finishShop() {
+    this.state = "pathSelect";
+    this.offerPaths();
+  }
+
+  offerPaths() {
+    if (this.roomsSinceBoss >= this.nextBossIn) {
+      this.pendingBoss = true;
+    }
+    const mapView = this.map.getMapView(this.pendingBoss);
+    mapView.floor = this.floorsCleared + 1;
+    this.onPathChoice?.(mapView, (nodeId, type) => this.pickPath(nodeId, type));
+  }
+
+  pickPath(nodeId, type) {
+    this.chanceOutcome = null;
+    this.bonusOutcome = null;
+    const advanced = this.map.advance(nodeId);
+    if (!advanced) {
+      console.warn("Map advance failed for node", nodeId);
+    }
+
+    if (type === PATH_TYPES.BOSS) {
+      this.pendingBoss = false;
+      this.spawnRoom(PATH_TYPES.BOSS);
+      return;
+    }
+    if (type === PATH_TYPES.REST) {
+      this.spawnRestRoom(this._player);
+      return;
+    }
+    if (type === PATH_TYPES.SHOP) {
+      if (this.challengeMods?.noShop) {
+        this.spawnRoom(PATH_TYPES.COMBAT);
+        return;
+      }
+      this.enterShop();
+      return;
+    }
+    if (type === PATH_TYPES.MINIGAME) {
+      this.spawnMinigameRoom();
+      return;
+    }
+    if (type === PATH_TYPES.CHANCE) {
+      this.spawnChanceRoom();
+      return;
+    }
+    this.spawnRoom(type);
   }
 
   update(dt, player, bulletPool) {
+    this._player = player;
+
+    if (this.bossIntroTimer > 0) this.bossIntroTimer -= dt;
+
+    if (this.state === "minigame") return;
+    if (this.state === "chance") return;
+
     if (this.state === "fighting") {
-      for (const enemy of this.enemies) {
-        enemy.update(dt, player, bulletPool);
+      if (this.bossIntroTimer <= 0) {
+        for (const enemy of this.enemies) {
+          enemy.update(dt, player, bulletPool, this.enemies, this.arena, this.hazardSystem, this.scaledEnemyFireMult);
+        }
+        this.arenaHazards?.update(dt, player, bulletPool);
       }
 
       if (this.enemies.every((e) => !e.alive)) {
+        this.removeEnemyVisuals();
+        const hadBoss = this.isBossRoom;
+        const hadMiniboss = this.currentRoomType === PATH_TYPES.MINIBOSS;
+        const hardBonus = this.roomScoreMultiplier > 1 ? 600 : 0;
         this.state = "clearing";
-        this.transitionTimer = 1.2;
+        this.transitionTimer = hadBoss ? 2.5 : 1.0;
+        if (hadBoss) {
+          this.bossDefeatsThisRun++;
+          this.floorsCleared++;
+          this.roomsSinceBoss = 0;
+          this.nextBossIn = 5 + Math.floor(Math.random() * 6);
+          this.onBossDefeated?.();
+        } else if (this.currentRoomType !== PATH_TYPES.REST) {
+          this.floorsCleared++;
+          this.roomsSinceBoss++;
+          this.onRoomCleared?.(this.floorsCleared, hardBonus);
+        }
+        if (hadMiniboss) this.onMinibossDrop?.();
       }
     } else if (this.state === "clearing") {
       this.transitionTimer -= dt;
       if (this.transitionTimer <= 0) {
-        this.state = "transitioning";
-        this.transitionTimer = 1.5;
-      }
-    } else if (this.state === "transitioning") {
-      this.transitionTimer -= dt;
-      if (this.transitionTimer <= 0) {
-        this.currentRoom++;
-        bulletPool.clear();
-        this.spawnRoom();
-        player.x = 0;
-        player.z = ARENA_SIZE / 2 - 3;
-        player.group.position.set(player.x, 0.5, player.z);
+        this.state = "pathSelect";
+        this.offerPaths();
       }
     }
   }
@@ -120,39 +357,76 @@ export class RoomManager {
   }
 
   getMessage() {
+    if (this.bossIntroTimer > 0 && this.isBossRoom) return "⚠ BOSS APPROACHES ⚠";
     const boss = this.enemies.find((e) => e.type === "boss");
     const liveBoss = boss?.alive ? boss : null;
     const bossMsg = liveBoss?.getPhaseLabel?.();
     if (bossMsg) return bossMsg;
-    if (this.state === "clearing") {
-      return boss ? "Boss Defeated!" : "Room Clear!";
+    if (this.state === "minigame") {
+      if (this.currentRoomType === PATH_TYPES.REST) return "Rest shrine — random challenge for healing";
+      return "Bonus vault — beat the minigame to claim loot";
     }
-    if (this.state === "transitioning") return `Entering Room ${this.currentRoom + 2}...`;
+    if (this.state === "chance") return "Oracle shrine — fate awaits…";
+    if (this.state === "clearing") {
+      if (this.currentRoomType === PATH_TYPES.MINIGAME) {
+        if (this.bonusOutcome === "failed") return "Vault sealed — minigame failed";
+        if (this.bonusOutcome === "score") return "Jackpot! +500 pts";
+        if (this.bonusOutcome === "heal") return "Salve +1 ♥";
+        if (this.bonusOutcome === "item") return "Relic acquired!";
+        return "Bonus earned!";
+      }
+      if (this.currentRoomType === PATH_TYPES.CHANCE) {
+        if (this.chanceOutcome === "damage") return "Curse! -1 ♥";
+        if (this.chanceOutcome === "heal") return "Blessed +1 ♥";
+        if (this.chanceOutcome === "item") return "Relic acquired!";
+      }
+      if (boss) return "Boss Defeated!";
+      if (this.currentRoomType === PATH_TYPES.REST) {
+        return this.restHealed ? "Rested +1 ♥" : "Rest complete";
+      }
+      if (this.currentRoomType === PATH_TYPES.MINIBOSS) return "Miniboss Down!";
+      if (this.currentRoomType === PATH_TYPES.HARD) return "Hard room clear · 2× score!";
+      return "Room Clear!";
+    }
+    if (this.state === "pathSelect") return "Choose your path...";
+    if (this.state === "shop") return "Shop open";
     return null;
   }
 
   isTransitioning() {
-    return this.state === "clearing" || this.state === "transitioning";
+    return this.state === "clearing";
+  }
+
+  isPaused() {
+    return this.state === "pathSelect" || this.state === "shop" || this.state === "minigame" || this.state === "chance";
+  }
+
+  isBossIntro() {
+    return this.bossIntroTimer > 0 && this.isBossRoom;
+  }
+
+  removeEnemyVisuals() {
+    for (const e of this.enemies) {
+      if (e.group?.parent) this.scene.remove(e.group);
+      if (e.mesh?.parent) this.scene.remove(e.mesh);
+      if (e.laserGroup?.parent) this.scene.remove(e.laserGroup);
+    }
   }
 
   clearEnemies() {
     for (const e of this.enemies) {
-      if (e.alive) {
-        if (e.dispose) e.dispose();
-        else {
-          this.scene.remove(e.mesh);
-          e.mesh.geometry.dispose();
-          e.mesh.material.dispose();
-        }
+      if (typeof e.dispose === "function") {
+        e.dispose();
+        continue;
       }
+      if (e.mesh) {
+        if (e.mesh.parent) this.scene.remove(e.mesh);
+        e.mesh.geometry?.dispose();
+        e.mesh.material?.dispose();
+        e.mesh = null;
+      }
+      if (e.group?.parent) this.scene.remove(e.group);
     }
     this.enemies = [];
-  }
-
-  reset() {
-    this.currentRoom = 0;
-    this.state = "fighting";
-    this.transitionTimer = 0;
-    this.clearEnemies();
   }
 }

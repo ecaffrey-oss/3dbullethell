@@ -14,11 +14,18 @@ export class InputManager {
       this.mouse.x = e.clientX;
       this.mouse.y = e.clientY;
     });
-    canvas.addEventListener("mousedown", () => (this.mouse.down = true));
-    canvas.addEventListener("mouseup", () => (this.mouse.down = false));
+    const releaseMouse = () => {
+      this.mouse.down = false;
+    };
+    canvas.addEventListener("mousedown", () => {
+      this.mouse.down = true;
+    });
+    canvas.addEventListener("mouseup", releaseMouse);
+    window.addEventListener("mouseup", releaseMouse);
+    canvas.addEventListener("mouseleave", releaseMouse);
     window.addEventListener("blur", () => {
       this.keys.clear();
-      this.mouse.down = false;
+      releaseMouse();
     });
   }
 

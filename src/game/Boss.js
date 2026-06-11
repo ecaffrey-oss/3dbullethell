@@ -1,14 +1,66 @@
 import * as THREE from "three";
-import { COLORS, ARENA_SIZE, ENEMY_BULLET_SPEED } from "./constants.js";
+import { COLORS, ENEMY_BULLET_SPEED } from "./constants.js";
+import { pickBossAttacks, pickPostBossAttacks } from "./BossAttacks.js";
+import { updateStatuses } from "./StatusEffects.js";
 
-const BOSS_MAX_HEALTH = 60;
-const PHASE2_THRESHOLD = 40;
-const PHASE3_THRESHOLD = 20;
+const BOSS_MAX_HEALTH = 320;
+const PHASE2_THRESHOLD = 210;
+const PHASE3_THRESHOLD = 90;
+
+const MOVEMENT = {
+  stalker: {
+    name: "Stalker",
+    update(boss, dt, player, arena) {
+      const dx = player.x - boss.x;
+      const dz = player.z - boss.z;
+      const dist = Math.hypot(dx, dz) || 1;
+      const speed = 2.2;
+      if (dist > 3) {
+        boss.x += (dx / dist) * speed * dt;
+        boss.z += (dz / dist) * speed * dt;
+      }
+    },
+  },
+  orbiter: {
+    name: "Orbiter",
+    update(boss, dt, player, arena) {
+      boss._orbitAngle = (boss._orbitAngle ?? 0) + dt * 0.9;
+      const r = 5;
+      boss.x = Math.cos(boss._orbitAngle) * r;
+      boss.z = -4 + Math.sin(boss._orbitAngle) * 3;
+    },
+  },
+  dasher: {
+    name: "Dasher",
+    update(boss, dt, player, arena) {
+      if (!boss._dashDir) {
+        const dx = player.x - boss.x;
+        const dz = player.z - boss.z;
+        const len = Math.hypot(dx, dz) || 1;
+        boss._dashDir = { x: dx / len, z: dz / len };
+      }
+      const speed = 5;
+      boss.x += boss._dashDir.x * speed * dt;
+      boss.z += boss._dashDir.z * speed * dt;
+      const half = (arena?.half ?? 11) - 2;
+      if (Math.abs(boss.x) > half) {
+        boss._dashDir.x *= -1;
+        boss.x = THREE.MathUtils.clamp(boss.x, -half, half);
+      }
+      if (boss.z > half || boss.z < -half) {
+        boss._dashDir.z *= -1;
+        boss.z = THREE.MathUtils.clamp(boss.z, -half, half);
+      }
+    },
+  },
+};
 
 export class Boss {
-  constructor(scene, x = 0, z = -6) {
+  constructor(scene, x = 0, z = -3, movementType = "stalker", rematch = false) {
     this.scene = scene;
     this.type = "boss";
+    this.movementType = movementType;
+    this.movement = MOVEMENT[movementType] ?? MOVEMENT.stalker;
     this.x = x;
     this.z = z;
     this.health = BOSS_MAX_HEALTH;
@@ -16,231 +68,142 @@ export class Boss {
     this.alive = true;
     this.phase = 1;
     this.phaseTransitionTimer = 0;
-    this.score = 2000;
+    this.score = 2500;
     this.config = { color: COLORS.boss };
+    this.statuses = [];
+    this.statusDamageMult = 1;
 
-    // Phase 1 — rings
-    this.ringTimer = 1.5;
-    this.ringInterval = 2.2;
-    this.ringCount = 16;
-    this.pendingRingDelay = 0;
+    this.activeAttacks = rematch ? pickPostBossAttacks(3) : pickBossAttacks(1, 3);
+    this.attackIndex = 0;
+    this.attackTimer = 1.5;
 
-    // Phase 2 — spiral
-    this.spiralAngle = 0;
-    this.spiralTimer = 0;
-    this.spiralInterval = 0.07;
-    this.spiralArms = 3;
-
-    // Phase 3 — laser
     this.laserState = "idle";
     this.laserTimer = 0;
     this.laserDir = { x: 0, z: 1 };
-    this.laserLength = ARENA_SIZE;
+    this.laserLength = 30;
 
     this.buildMesh();
     this.buildLaser();
   }
 
   get radius() {
-    return 1.2;
+    return 1.3;
   }
 
   buildMesh() {
     this.group = new THREE.Group();
-
-    const bodyGeo = new THREE.IcosahedronGeometry(1.1, 1);
-    this.bodyMat = new THREE.MeshStandardMaterial({
-      color: COLORS.boss,
-      emissive: COLORS.boss,
-      emissiveIntensity: 0.55,
-      metalness: 0.4,
-      roughness: 0.35,
-    });
-    this.body = new THREE.Mesh(bodyGeo, bodyMat);
-    this.body.castShadow = true;
+    this.bodyMat = new THREE.MeshBasicMaterial({ color: COLORS.boss });
+    this.body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 0), this.bodyMat);
     this.group.add(this.body);
 
-    const coreGeo = new THREE.OctahedronGeometry(0.45);
-    this.coreMat = new THREE.MeshStandardMaterial({
-      color: COLORS.bossCore,
-      emissive: COLORS.bossCore,
-      emissiveIntensity: 0.9,
-      metalness: 0.5,
-      roughness: 0.2,
-    });
-    this.core = new THREE.Mesh(coreGeo, this.coreMat);
+    this.coreMat = new THREE.MeshBasicMaterial({ color: COLORS.bossCore });
+    this.core = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), this.coreMat);
     this.group.add(this.core);
 
-    const ringGeo = new THREE.TorusGeometry(1.5, 0.06, 8, 32);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: COLORS.boss,
-      transparent: true,
-      opacity: 0.35,
-    });
-    this.orbitRing = new THREE.Mesh(ringGeo, ringMat);
+    this.orbitRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1.6, 0.06, 8, 32),
+      new THREE.MeshBasicMaterial({ color: COLORS.boss, transparent: true, opacity: 0.35 })
+    );
     this.orbitRing.rotation.x = Math.PI / 2;
     this.group.add(this.orbitRing);
 
     this.group.position.set(this.x, 1.2, this.z);
+    this.group.scale.setScalar(1.4);
     this.scene.add(this.group);
+
+    this.bossLight = new THREE.PointLight(COLORS.bossCore, 3, 16);
+    this.bossLight.position.set(0, 1, 0);
+    this.group.add(this.bossLight);
   }
 
   buildLaser() {
     this.laserGroup = new THREE.Group();
     this.laserGroup.visible = false;
-
-    const beamGeo = new THREE.BoxGeometry(0.7, 0.15, this.laserLength);
-    const beamMat = new THREE.MeshBasicMaterial({
-      color: COLORS.laser,
-      transparent: true,
-      opacity: 0.85,
-    });
-    this.laserBeam = new THREE.Mesh(beamGeo, beamMat);
+    this.laserBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(0.7, 0.15, this.laserLength),
+      new THREE.MeshBasicMaterial({ color: COLORS.laser, transparent: true, opacity: 0.85 })
+    );
     this.laserBeam.position.z = -this.laserLength / 2;
     this.laserGroup.add(this.laserBeam);
-
-    const warnGeo = new THREE.BoxGeometry(0.25, 0.08, this.laserLength);
-    const warnMat = new THREE.MeshBasicMaterial({
-      color: COLORS.laserWarn,
-      transparent: true,
-      opacity: 0.5,
-    });
-    this.laserWarn = new THREE.Mesh(warnGeo, warnMat);
+    this.laserWarn = new THREE.Mesh(
+      new THREE.BoxGeometry(0.25, 0.08, this.laserLength),
+      new THREE.MeshBasicMaterial({ color: COLORS.laserWarn, transparent: true, opacity: 0.5 })
+    );
     this.laserWarn.position.z = -this.laserLength / 2;
     this.laserGroup.add(this.laserWarn);
-
     this.scene.add(this.laserGroup);
   }
 
-  update(dt, player, bulletPool) {
+  update(dt, player, bulletPool, _allEnemies, arena) {
+    if (!this.alive) return;
+    updateStatuses(this, dt);
     if (!this.alive) return;
 
     if (this.phaseTransitionTimer > 0) {
       this.phaseTransitionTimer -= dt;
-      this.bodyMat.emissiveIntensity = 1.5 + Math.sin(Date.now() * 0.02) * 0.5;
-      this.group.position.set(this.x, 1.2 + Math.sin(Date.now() * 0.008) * 0.15, this.z);
-      this.body.rotation.y += dt * 4;
-      this.core.rotation.x += dt * 6;
-      this.core.rotation.z += dt * 4;
+      this.bodyMat.color.setHex(COLORS.bossCore);
       return;
     }
 
+    this.movement.update(this, dt, player, arena);
+    if (arena) {
+      const c = arena.clampPlayer(this.x, this.z, this.radius);
+      this.x = c.x;
+      this.z = c.z;
+    }
+
+    this.group.position.set(this.x, 1.2 + Math.sin(Date.now() * 0.002) * 0.1, this.z);
     this.body.rotation.y += dt * 0.8;
     this.core.rotation.x += dt * 2;
-    this.core.rotation.z += dt * 1.5;
-    this.orbitRing.rotation.z += dt * (this.phase * 0.8);
+    this.orbitRing.rotation.z += dt * this.phase;
 
-    const bob = Math.sin(Date.now() * 0.002) * 0.1;
-    this.group.position.set(this.x, 1.2 + bob, this.z);
+    if (this.laserState !== "idle") {
+      this.updateLaser(dt, player);
+      return;
+    }
 
-    if (this.phase === 1) this.updatePhase1(dt, player, bulletPool);
-    else if (this.phase === 2) this.updatePhase2(dt, player, bulletPool);
-    else this.updatePhase3(dt, player, bulletPool);
-  }
-
-  updatePhase1(dt, player, bulletPool) {
-    if (this.pendingRingDelay > 0) {
-      this.pendingRingDelay -= dt;
-      if (this.pendingRingDelay <= 0 && player.alive) {
-        bulletPool.spawnRadialBurst(
-          this.x,
-          this.z,
-          this.ringCount,
-          ENEMY_BULLET_SPEED * 0.75
-        );
+    if (!player.alive) return;
+    const attack = this.activeAttacks[this.attackIndex];
+    this.attackTimer -= dt;
+    if (this.attackTimer <= 0) {
+      if (attack.isLaser) this.startLaserAttack(player);
+      else {
+        attack.exec(this, player, bulletPool);
+        this.attackTimer = attack.cooldown;
+        if (!attack.isContinuous) this.attackIndex = (this.attackIndex + 1) % this.activeAttacks.length;
       }
     }
-
-    this.ringTimer -= dt;
-    if (this.ringTimer <= 0 && player.alive) {
-      bulletPool.spawnRadialBurst(this.x, this.z, this.ringCount, ENEMY_BULLET_SPEED * 0.9);
-      this.pendingRingDelay = 0.4;
-      this.ringTimer = this.ringInterval;
-    }
   }
 
-  updatePhase2(dt, player, bulletPool) {
-    this.spiralTimer -= dt;
-    if (this.spiralTimer <= 0 && player.alive) {
-      this.spiralAngle += 0.28;
-      for (let arm = 0; arm < this.spiralArms; arm++) {
-        const a = this.spiralAngle + (arm / this.spiralArms) * Math.PI * 2;
-        bulletPool.spawnEnemyBullet(
-          this.x,
-          this.z,
-          Math.cos(a),
-          Math.sin(a),
-          ENEMY_BULLET_SPEED * 1.1
-        );
-      }
-      this.spiralTimer = this.spiralInterval;
-    }
-
-    // Occasional tight ring for pressure
-    this.ringTimer -= dt;
-    if (this.ringTimer <= 0) {
-      bulletPool.spawnRadialBurst(this.x, this.z, 12, ENEMY_BULLET_SPEED);
-      this.ringTimer = 4;
-    }
+  startLaserAttack(player) {
+    this.laserState = "charging";
+    this.laserTimer = 1.3;
+    this.aimLaserAt(player);
+    this.laserGroup.visible = true;
+    this.laserBeam.visible = false;
+    this.laserWarn.visible = true;
+    this.updateLaserVisual();
   }
 
-  updatePhase3(dt, player, bulletPool) {
+  updateLaser(dt, player) {
     this.laserTimer -= dt;
-
-    if (this.laserState === "idle") {
-      this.laserGroup.visible = false;
-      if (this.laserTimer <= 0 && player.alive) {
-        this.laserState = "charging";
-        this.laserTimer = 1.4;
-        this.aimLaserAt(player);
-        this.laserGroup.visible = true;
-        this.laserBeam.visible = false;
-        this.laserWarn.visible = true;
-        this.updateLaserVisual();
-      }
-    } else if (this.laserState === "charging") {
-      // Slowly track the player during charge
+    if (this.laserState === "charging") {
       this.trackLaserToward(player, dt, 0.6);
       this.updateLaserVisual();
-      this.laserWarn.material.opacity = 0.35 + Math.sin(Date.now() * 0.015) * 0.25;
-
       if (this.laserTimer <= 0) {
         this.laserState = "firing";
-        this.laserTimer = 0.9;
+        this.laserTimer = 0.85;
         this.laserBeam.visible = true;
         this.laserWarn.visible = false;
-        this.laserBeam.material.opacity = 1;
       }
     } else if (this.laserState === "firing") {
       this.trackLaserToward(player, dt, 0.15);
       this.updateLaserVisual();
-      this.laserBeam.material.opacity = 0.7 + Math.sin(Date.now() * 0.04) * 0.3;
-
-      if (this.laserTimer <= 0) {
-        this.laserState = "cooldown";
-        this.laserTimer = 2.0;
-        this.laserGroup.visible = false;
-      }
-    } else if (this.laserState === "cooldown") {
-      this.laserGroup.visible = false;
-
-      // Spiral bursts between laser shots
-      this.spiralTimer -= dt;
-      if (this.spiralTimer <= 0 && player.alive) {
-        this.spiralAngle += 0.5;
-        bulletPool.spawnEnemyBullet(
-          this.x,
-          this.z,
-          Math.cos(this.spiralAngle),
-          Math.sin(this.spiralAngle),
-          ENEMY_BULLET_SPEED * 1.2
-        );
-        this.spiralTimer = 0.12;
-      }
-
       if (this.laserTimer <= 0) {
         this.laserState = "idle";
-        this.laserTimer = 0.8;
+        this.laserGroup.visible = false;
+        this.attackIndex = (this.attackIndex + 1) % this.activeAttacks.length;
+        this.attackTimer = 0.8;
       }
     }
   }
@@ -256,67 +219,43 @@ export class Boss {
     const dx = player.x - this.x;
     const dz = player.z - this.z;
     const len = Math.hypot(dx, dz) || 1;
-    const targetX = dx / len;
-    const targetZ = dz / len;
-
-    this.laserDir.x += (targetX - this.laserDir.x) * turnSpeed * dt;
-    this.laserDir.z += (targetZ - this.laserDir.z) * turnSpeed * dt;
+    this.laserDir.x += ((dx / len) - this.laserDir.x) * turnSpeed * dt;
+    this.laserDir.z += ((dz / len) - this.laserDir.z) * turnSpeed * dt;
     const dLen = Math.hypot(this.laserDir.x, this.laserDir.z) || 1;
     this.laserDir.x /= dLen;
     this.laserDir.z /= dLen;
   }
 
   updateLaserVisual() {
-    const angle = Math.atan2(this.laserDir.x, this.laserDir.z);
     this.laserGroup.position.set(this.x, 0.55, this.z);
-    this.laserGroup.rotation.y = angle;
+    this.laserGroup.rotation.y = Math.atan2(this.laserDir.x, this.laserDir.z);
   }
 
   isLaserActive() {
-    return this.alive && this.phase === 3 && this.laserState === "firing";
+    return this.alive && this.laserState === "firing";
   }
 
   checkLaserHit(px, pz, playerRadius) {
     if (!this.isLaserActive()) return false;
-
-    const halfWidth = 0.45;
-    const ox = this.x;
-    const oz = this.z;
-    const dx = this.laserDir.x;
-    const dz = this.laserDir.z;
-
-    const relX = px - ox;
-    const relZ = pz - oz;
-    const along = relX * dx + relZ * dz;
-
+    const relX = px - this.x;
+    const relZ = pz - this.z;
+    const along = relX * this.laserDir.x + relZ * this.laserDir.z;
     if (along < 0 || along > this.laserLength) return false;
-
-    const perp = Math.abs(relX * dz - relZ * dx);
-    return perp < halfWidth + playerRadius;
+    const perp = Math.abs(relX * this.laserDir.z - relZ * this.laserDir.x);
+    return perp < 0.45 + playerRadius;
   }
 
-  takeDamage(amount) {
-    if (this.phaseTransitionTimer > 0) return false;
-
+  takeDamage(amount, isDot = false) {
+    if (!isDot && this.phaseTransitionTimer > 0) return false;
+    amount *= this.statusDamageMult ?? 1;
     this.health -= amount;
-    this.bodyMat.emissiveIntensity = 1.8;
-    setTimeout(() => {
-      if (this.bodyMat) this.bodyMat.emissiveIntensity = 0.55;
-    }, 80);
-
-    const prevPhase = this.phase;
-    if (this.health <= PHASE2_THRESHOLD && this.phase < 2) {
-      this.enterPhase(2);
-    } else if (this.health <= PHASE3_THRESHOLD && this.phase < 3) {
-      this.enterPhase(3);
-    }
-
+    this.bodyMat.color.setHex(0xffffff);
+    if (this.health <= PHASE3_THRESHOLD && this.phase < 3) this.enterPhase(3);
+    else if (this.health <= PHASE2_THRESHOLD && this.phase < 2) this.enterPhase(2);
     if (this.health <= 0) {
       this.die();
       return true;
     }
-
-    if (this.phase !== prevPhase) return false;
     return false;
   }
 
@@ -325,21 +264,16 @@ export class Boss {
     this.phaseTransitionTimer = 1.8;
     this.laserState = "idle";
     this.laserGroup.visible = false;
-    this.laserTimer = phase === 3 ? 1.5 : 0;
-
-    const phaseColors = [COLORS.boss, 0xff4488, 0xff6600];
-    this.bodyMat.color.setHex(phaseColors[phase - 1]);
-    this.bodyMat.emissive.setHex(phaseColors[phase - 1]);
-
-    if (phase === 2) {
-      this.spiralArms = 4;
-      this.spiralInterval = 0.055;
-    }
+    this.activeAttacks = pickBossAttacks(phase, 3);
+    this.attackIndex = 0;
+    this.attackTimer = 1.2;
+    const colors = [COLORS.boss, 0xff4488, 0xff6600];
+    this.bodyMat.color.setHex(colors[phase - 1]);
   }
 
   getPhaseLabel() {
-    if (this.phaseTransitionTimer > 0) return `Phase ${this.phase}!`;
-    if (this.phase === 3 && this.laserState === "charging") return "Laser charging!";
+    if (this.phaseTransitionTimer > 0) return `Phase ${this.phase}! (${this.movement.name})`;
+    if (this.laserState === "charging") return "Laser charging!";
     return null;
   }
 

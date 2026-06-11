@@ -3,34 +3,96 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
     <title>Bullet Hell 3D</title>
   </head>
   <body>
     <div id="hud">
+      <button type="button" id="pause-btn" class="hidden" title="Pause (P)">⏸</button>
       <div id="stats">
-        <span id="room-label">Room 1</span>
-        <span id="health-label">♥ ♥ ♥</span>
-        <span id="score-label">Score: 0</span>
+        <div class="hud-bar">
+          <span id="room-label" class="hud-chip">Floor 1</span>
+          <div id="health-hud" class="hud-chip hud-health">
+            <div id="health-bar-track"><div id="health-bar-fill"></div></div>
+            <span id="health-text">3/3</span>
+          </div>
+          <span id="score-label" class="hud-chip">Score: 0</span>
+          <span id="weapon-label" class="hud-chip">Pulse</span>
+        </div>
+        <div class="hud-bar hud-bar-sub">
+          <span id="scale-label" class="hud-chip">HP ×1.0</span>
+          <span id="upgrades-label" class="hud-chip hud-upgrades"></span>
+        </div>
       </div>
       <div id="message" class="hidden"></div>
       <div id="boss-hud" class="hidden">
         <div id="boss-name">BOSS</div>
         <div id="boss-phase">Phase 1</div>
-        <div id="boss-bar-track">
-          <div id="boss-bar-fill"></div>
-        </div>
+        <div id="boss-bar-track"><div id="boss-bar-fill"></div></div>
       </div>
-      <div id="controls">
-        WASD / Arrows — Move &nbsp;|&nbsp; Mouse — Aim &nbsp;|&nbsp; Hold Click / Space — Shoot
-      </div>
+      <div id="controls">WASD — Move · Mouse — Aim · Click — Shoot · Shift+1–9 — Weapon · P — Pause</div>
     </div>
     <canvas id="game"></canvas>
-    <div id="overlay" class="hidden">
-      <div id="overlay-content">
+    <div id="draft-panel" class="hidden"></div>
+    <div id="path-panel" class="hidden"></div>
+    <div id="shop-panel" class="hidden"></div>
+    <div id="minigame-panel" class="hidden"></div>
+    <div id="chance-panel" class="hidden"></div>
+    <div id="pause-panel" class="hidden">
+      <div class="menu-shell pause-inner menu-repel">
+        <div class="menu-shell-header">
+          <span class="menu-shell-badge">PAUSE</span>
+          <div class="draft-title">Paused</div>
+        </div>
+        <button type="button" id="pause-resume-btn" class="menu-btn">Resume</button>
+        <button type="button" id="pause-menu-btn" class="menu-btn menu-btn-secondary">Return to Menu</button>
+      </div>
+    </div>
+    <div id="overlay">
+      <div class="menu-starfield" aria-hidden="true"></div>
+      <div id="overlay-content" class="menu-shell menu-shell-title menu-repel">
+        <div class="title-ornament">✦ · ✦ · ✦</div>
         <h1 id="overlay-title">Bullet Hell 3D</h1>
-        <p id="overlay-text">Survive each room. Destroy all enemies. Don't get hit.</p>
-        <button id="start-btn">Start Game</button>
+        <p id="overlay-subtitle" class="overlay-subtitle">Roguelike arena shooter</p>
+        <p id="overlay-text">Choose a save file to manage skills, weapons, and progress.</p>
+        <div id="save-select-view">
+          <div id="save-slots"></div>
+        </div>
+        <div id="save-profile-view" class="hidden">
+          <p id="bank-score-menu" class="bank-score">Bank: 0 pts</p>
+          <div id="menu-panels">
+            <div class="menu-panel-frame">
+              <div id="menu-tabs" class="menu-tabs-row">
+              <button type="button" id="skills-tab-btn" class="menu-tab-btn">Skills</button>
+              <button type="button" id="weapons-tab-btn" class="menu-tab-btn">Weapons</button>
+              <button type="button" id="achievements-tab-btn" class="menu-tab-btn">Achievements</button>
+              <button type="button" id="challenges-tab-btn" class="menu-tab-btn">Challenges</button>
+              <button type="button" id="items-tab-btn" class="menu-tab-btn">Items</button>
+              </div>
+            </div>
+            <div id="skill-tree-panel" class="hidden">
+              <div id="skill-tree"></div>
+            </div>
+            <div id="weapon-tab-panel" class="hidden">
+              <div id="weapon-select"></div>
+            </div>
+            <div id="achievements-panel" class="menu-sub-panel hidden">
+              <div id="achievements-list"></div>
+            </div>
+            <div id="challenges-panel" class="menu-sub-panel hidden">
+              <div id="challenges-list"></div>
+            </div>
+            <div id="items-panel" class="menu-sub-panel hidden">
+              <div id="items-list"></div>
+            </div>
+          </div>
+          <div class="profile-actions">
+            <button type="button" id="back-to-saves-btn" class="menu-btn menu-btn-secondary">← Saves</button>
+            <button id="start-btn" type="button" class="menu-start-btn">▶ Start Game</button>
+          </div>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>
