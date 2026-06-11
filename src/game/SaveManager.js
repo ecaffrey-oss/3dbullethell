@@ -11,6 +11,7 @@ const DEFAULT_SLOT = {
   selectedWeapon: "pulse",
   selectedChallenge: null,
   selectedRelic: null,
+  selectedAbility: null,
   achievements: [],
   challengesCompleted: [],
   unlockedItems: [],
@@ -19,12 +20,14 @@ const DEFAULT_SLOT = {
     chairKills: 0,
     ghostBosses: 0,
   },
+  activeRun: null,
 };
 
 export class SaveManager {
   constructor() {
-    this.activeSlot = 0;
     this.data = this.loadAll();
+    this.activeSlot = this.data.activeSlot ?? 0;
+    this.saveError = null;
   }
 
   loadAll() {
@@ -39,9 +42,11 @@ export class SaveManager {
           ...structuredClone(DEFAULT_SLOT.lifetime),
           ...(parsed.slots?.[i]?.lifetime ?? {}),
         },
+        activeRun: parsed.slots?.[i]?.activeRun ?? null,
       }));
       return {
         activeSlot: parsed.activeSlot ?? 0,
+        lastMenuView: parsed.lastMenuView === "profile" ? "profile" : "select",
         slots,
       };
     } catch {
@@ -52,12 +57,41 @@ export class SaveManager {
   createDefaultData() {
     return {
       activeSlot: 0,
+      lastMenuView: "select",
       slots: Array.from({ length: SLOT_COUNT }, () => structuredClone(DEFAULT_SLOT)),
     };
   }
 
   saveAll() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
+      this.saveError = null;
+      return true;
+    } catch (err) {
+      this.saveError = err;
+      console.warn("Save failed — progress may not persist:", err);
+      return false;
+    }
+  }
+
+  getLastMenuView() {
+    return this.data.lastMenuView === "profile" ? "profile" : "select";
+  }
+
+  setLastMenuView(view) {
+    this.data.lastMenuView = view === "profile" ? "profile" : "select";
+    this.saveAll();
+  }
+
+  storageAvailable() {
+    try {
+      const probe = "__bulletHell3d_probe__";
+      localStorage.setItem(probe, "1");
+      localStorage.removeItem(probe);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   setActiveSlot(index) {
@@ -121,6 +155,16 @@ export class SaveManager {
   set selectedRelic(id) {
     this.mutateActive((s) => {
       s.selectedRelic = id;
+    });
+  }
+
+  get selectedAbility() {
+    return this.getActive().selectedAbility ?? null;
+  }
+
+  set selectedAbility(id) {
+    this.mutateActive((s) => {
+      s.selectedAbility = id;
     });
   }
 
@@ -211,6 +255,22 @@ export class SaveManager {
     return this.getActive().maxFloorsCleared ?? 0;
   }
 
+  getActiveRun() {
+    return this.getActive().activeRun ?? null;
+  }
+
+  setActiveRun(snapshot) {
+    this.mutateActive((s) => {
+      s.activeRun = snapshot;
+    });
+  }
+
+  clearActiveRun() {
+    this.mutateActive((s) => {
+      s.activeRun = null;
+    });
+  }
+
   spendScore(amount) {
     const slot = this.getActive();
     if (slot.bankScore < amount) return false;
@@ -232,5 +292,3 @@ export class SaveManager {
     };
   }
 }
-
-export { SaveManager as MetaProgress };

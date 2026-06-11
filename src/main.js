@@ -15,6 +15,8 @@ const game = new Game(document.getElementById("game"), {
   saveSelectView: document.getElementById("save-select-view"),
   saveProfileView: document.getElementById("save-profile-view"),
   backToSavesBtn: document.getElementById("back-to-saves-btn"),
+  continueRunBtn: document.getElementById("continue-run-btn"),
+  continueRunHint: document.getElementById("continue-run-hint"),
   menuPanels: document.getElementById("menu-panels"),
   skillTreeContainer: document.getElementById("skill-tree"),
   skillTreePanel: document.getElementById("skill-tree-panel"),
@@ -30,15 +32,21 @@ const game = new Game(document.getElementById("game"), {
   pausePanel: document.getElementById("pause-panel"),
   pauseResumeBtn: document.getElementById("pause-resume-btn"),
   pauseMenuBtn: document.getElementById("pause-menu-btn"),
+  pauseEndRunBtn: document.getElementById("pause-end-run-btn"),
+  musicVolume: document.getElementById("music-volume"),
+  sfxVolume: document.getElementById("sfx-volume"),
   achievementsPanel: document.getElementById("achievements-panel"),
   achievementsContainer: document.getElementById("achievements-list"),
   challengesPanel: document.getElementById("challenges-panel"),
   challengesContainer: document.getElementById("challenges-list"),
   itemsPanel: document.getElementById("items-panel"),
   itemsContainer: document.getElementById("items-list"),
+  abilitiesPanel: document.getElementById("abilities-panel"),
+  abilitiesContainer: document.getElementById("abilities-list"),
 });
 
 document.getElementById("start-btn").addEventListener("click", (e) => {
   e.preventDefault();
+  game.unlockAudio();
   game.start();
 });

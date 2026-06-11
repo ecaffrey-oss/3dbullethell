@@ -89,6 +89,114 @@ export const UNLOCKABLES = [
     desc: "Damage aura at run start",
     source: { achievement: "hard_mode" },
   },
+  {
+    id: "ability_dash",
+    type: "ability",
+    name: "Blink Dash",
+    desc: "Invulnerable burst dash · E · 2.5s cooldown",
+    source: { achievement: "flawless_chain" },
+    altSource: { challenge: "ascetic" },
+  },
+  {
+    id: "ability_nova",
+    type: "ability",
+    name: "Nova Burst",
+    desc: "Area damage around you · E · 4s cooldown",
+    source: { achievement: "hard_mode" },
+    altSource: { achievement: "million_damage" },
+  },
+  {
+    id: "ability_wall",
+    type: "ability",
+    name: "Barrier Deploy",
+    desc: "Cover wall for this room · E · 6s cooldown",
+    source: { challenge: "iron_man" },
+    altSource: { achievement: "fortress" },
+  },
+  {
+    id: "ability_turret",
+    type: "ability",
+    name: "Sentry Pod",
+    desc: "Friendly turret for this room · E · 8s cooldown",
+    source: { challenge: "swarm" },
+    altSource: { achievement: "veteran" },
+  },
+  {
+    id: "ability_death_beam",
+    type: "ability",
+    name: "Annihilator Beam",
+    desc: "Instant-kill beam · once per room · E",
+    source: { achievement: "ghost_boss" },
+    altSource: { challenge: "glass" },
+  },
+  {
+    id: "ability_shield",
+    type: "ability",
+    name: "Aegis Bubble",
+    desc: "Timed damage shield · E · 7s cooldown",
+    source: { achievement: "first_boss" },
+    altSource: { challenge: "glass" },
+  },
+  {
+    id: "ability_gravity",
+    type: "ability",
+    name: "Gravity Well",
+    desc: "Pull enemies inward · E · 5s cooldown",
+    source: { achievement: "boss_triple" },
+    altSource: { challenge: "bullet_heaven" },
+  },
+  {
+    id: "ability_chrono",
+    type: "ability",
+    name: "Chrono Field",
+    desc: "Slow all enemies · E · 9s cooldown",
+    source: { achievement: "deep_dive" },
+    altSource: { challenge: "nightmare" },
+  },
+  {
+    id: "ability_chain",
+    type: "ability",
+    name: "Chain Lightning",
+    desc: "Bouncing zap hits · E · 4.5s cooldown",
+    source: { achievement: "million_damage" },
+    altSource: { achievement: "fat_stack" },
+  },
+  {
+    id: "ability_phase",
+    type: "ability",
+    name: "Phase Echo",
+    desc: "Decoy + invuln blink · E · 6s cooldown",
+    source: { achievement: "chair_hunter" },
+    altSource: { challenge: "ascetic" },
+  },
+  {
+    id: "ability_overclock",
+    type: "ability",
+    name: "Overclock Pulse",
+    desc: "Halve ability cooldowns briefly · E · 14s cooldown",
+    source: { challenge: "pacifist_rooms" },
+  },
+  {
+    id: "relic_flow",
+    type: "relic",
+    name: "Flow State",
+    desc: "+12% move speed at run start",
+    source: { challenge: "still_heart" },
+  },
+  {
+    id: "relic_crimson",
+    type: "relic",
+    name: "Crimson Pact",
+    desc: "Stronger kill heals (+50%)",
+    source: { challenge: "blood_price" },
+  },
+  {
+    id: "relic_rift",
+    type: "relic",
+    name: "Rift Anchor",
+    desc: "−12% ability cooldown",
+    source: { challenge: "drift_surf" },
+  },
 ];
 
 const RELIC_EFFECTS = {
@@ -125,6 +233,15 @@ const RELIC_EFFECTS = {
     rs.damageAura = true;
     rs.auraRadius = 2.6;
   },
+  relic_flow: (rs) => {
+    rs.speedMult *= 1.12;
+  },
+  relic_crimson: (rs) => {
+    rs.lifestealMult = 1.5;
+  },
+  relic_rift: (rs) => {
+    rs.abilityCooldownMult *= 0.88;
+  },
 };
 
 export function getUnlockable(id) {
@@ -159,12 +276,4 @@ export function grantUnlocksForSource(meta, sourceType, sourceId) {
 export function applyRelic(relicId, player) {
   const fn = RELIC_EFFECTS[relicId];
   if (fn) fn(player.runState, player);
-}
-
-export function getRelics(meta) {
-  return UNLOCKABLES.filter((u) => u.type === "relic" && isUnlockGranted(meta, u));
-}
-
-export function getUnlockWeapons(meta) {
-  return UNLOCKABLES.filter((u) => u.type === "weapon" && isUnlockGranted(meta, u));
 }

@@ -1,4 +1,5 @@
 import { grantUnlocksForSource } from "./Unlockables.js";
+import { getUnlockable } from "./Unlockables.js";
 
 export const CHALLENGES = [
   {
@@ -77,10 +78,58 @@ export const CHALLENGES = [
       maxHealthCap: 2,
     },
   },
+  {
+    id: "still_heart",
+    name: "Still Heart",
+    desc: "Standing still slows you · normal enemy stats",
+    goal: { type: "floors", count: 10 },
+    reward: "relic_flow",
+    mods: {
+      idlePunish: true,
+    },
+  },
+  {
+    id: "blood_price",
+    name: "Blood Price",
+    desc: "Lose 1 ♥ every 18s in combat · enemies unchanged",
+    goal: { type: "floors", count: 11 },
+    reward: "relic_crimson",
+    mods: {
+      combatBleed: 18,
+    },
+  },
+  {
+    id: "drift_surf",
+    name: "Drift Surfer",
+    desc: "Arena pushes you sideways · normal enemy stats",
+    goal: { type: "combo", floors: 8, bosses: 1 },
+    reward: "relic_rift",
+    mods: {
+      drift: 2.8,
+    },
+  },
+  {
+    id: "pacifist_rooms",
+    name: "Quiet Steps",
+    desc: "First 2s of each room you cannot shoot · +50% score",
+    goal: { type: "floors", count: 9 },
+    reward: "ability_overclock",
+    mods: {
+      roomShootDelay: 2,
+      scoreMult: 1.5,
+    },
+  },
 ];
 
 export function getChallenge(id) {
   return CHALLENGES.find((c) => c.id === id) ?? null;
+}
+
+export function getChallengeRewardLabel(challenge) {
+  if (!challenge?.reward) return "Unknown reward";
+  const item = getUnlockable(challenge.reward);
+  if (item) return `${item.name} — ${item.desc}`;
+  return challenge.reward;
 }
 
 export function getChallengeGoalLabel(challenge) {

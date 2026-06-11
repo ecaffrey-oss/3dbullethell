@@ -244,10 +244,10 @@ export const WEAPONS = {
     description: "Heavy pierce beam — slow fire",
     unlock: "unlockable",
     unlockId: "void_lance",
-    fireRate: 0.28,
+    fireRate: 0.42,
     damage: 3,
     speed: 36,
-    drawbacks: { fireRateMult: 0.88 },
+    drawbacks: { fireRateMult: 0.82 },
     fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts) {
       return bulletPool.spawnBeamLine(x, z, dirX, dirZ, opts.arena, damage, {
         ...opts,

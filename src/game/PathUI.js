@@ -13,19 +13,11 @@ export const PATH_TYPES = {
 
 export const ROUTE_GUIDE = "Pick a route. Icons preview what comes next.";
 
-export const SHOP_RARE_CHANCE = 0.06;
+export const SHOP_UPGRADE_CHANCE = 0.1;
 
-export const SHOP_ITEMS = [
-  { id: "heal", name: "Repair Kit", desc: "Restore 1 HP", cost: 250, hpCost: 0, effect: "heal" },
-  { id: "heal2", name: "Med Pack", desc: "Restore 2 HP", cost: 520, hpCost: 0, effect: "heal2" },
-  { id: "damage", name: "Ammo Pack", desc: "+1 run damage", cost: 480, hpCost: 0, effect: "damage" },
-  { id: "speed", name: "Thruster Fuel", desc: "+10% run speed", cost: 420, hpCost: 0, effect: "speed" },
-  { id: "firerate", name: "Overclock Chip", desc: "+12% fire rate", cost: 450, hpCost: 0, effect: "firerate" },
-  { id: "range", name: "Range Lens", desc: "+15% bullet range", cost: 380, hpCost: 0, effect: "range" },
-  { id: "pierce", name: "Pierce Tip", desc: "+1 pierce this run", cost: 620, hpCost: 0, effect: "pierce" },
-  { id: "maxhp", name: "Hull Plate", desc: "+1 max HP", cost: 700, hpCost: 0, effect: "maxhp" },
-  { id: "shield", name: "Orbit Ring", desc: "+1 shield orb", cost: 850, hpCost: 0, effect: "shield" },
-  { id: "desperate_heal", name: "Emergency Patch", desc: "Restore 1 HP", cost: 0, hpCost: 1, effect: "heal" },
+export const SHOP_HEALS = [
+  { id: "heal", name: "Repair Kit", desc: "Restore 1 HP", cost: 250, effect: "heal" },
+  { id: "heal2", name: "Med Pack", desc: "Restore 2 HP", cost: 520, effect: "heal2" },
 ];
 
 export const MINIBOSS_DROPS = [
@@ -99,53 +91,63 @@ export class PathUI {
     }
   }
 
-  showShop(score, health, onBuy, onLeave, rareUpgrade = null) {
+  showShop(score, health, maxHealth, onBuy, onLeave, upgrade = null) {
     this.shopContainer.classList.remove("hidden");
+    const stockLine = upgrade
+      ? `<p class="shop-rare-banner">✦ Run upgrade in stock: ${upgrade.name} — ${upgrade.desc}</p>`
+      : `<p class="route-guide shop-empty">Supplies always in stock · upgrades are rare finds.</p>`;
     this.shopContainer.innerHTML = `
       <div class="menu-shell menu-repel path-inner">
         <div class="menu-shell-header">
           <span class="menu-shell-badge">SHOP</span>
-          <div class="draft-title">Shop — ${score} pts</div>
+          <div class="draft-title">Shop — ${score} pts · ${health}/${maxHealth} ♥</div>
         </div>
-        <p class="route-guide">Spend score, then pick your next route.</p>
-        ${rareUpgrade ? `<p class="shop-rare-banner">✦ Rare find: ${rareUpgrade.name} — ${rareUpgrade.desc}</p>` : ""}
+        ${stockLine}
         <div class="path-grid shop-grid"></div>
         <button type="button" class="menu-btn" id="leave-shop">Choose Next Route</button>
       </div>
     `;
     const grid = this.shopContainer.querySelector(".shop-grid");
 
-    if (rareUpgrade) {
-      const rareBtn = document.createElement("button");
-      rareBtn.type = "button";
-      rareBtn.className = "path-card shop-rare-card";
-      const canBuy = score >= (rareUpgrade.cost ?? 900);
-      if (!canBuy) {
-        rareBtn.classList.add("disabled");
-        rareBtn.disabled = true;
-      }
-      rareBtn.innerHTML = `
-        <span class="skill-name">✦ ${rareUpgrade.name}</span>
-        <span class="skill-desc">${rareUpgrade.desc}</span>
-        <span class="skill-cost">${rareUpgrade.cost ?? 900} pts · Rare</span>
-      `;
-      rareBtn.addEventListener("click", () => {
-        if (canBuy) onBuy({ effect: "rare_upgrade", upgradeId: rareUpgrade.id, cost: rareUpgrade.cost ?? 900, name: rareUpgrade.name });
-      });
-      grid.appendChild(rareBtn);
-    }
-
-    for (const item of SHOP_ITEMS) {
-      const canBuy = item.hpCost ? health > item.hpCost : score >= item.cost;
+    for (const item of SHOP_HEALS) {
+      const healAmt = item.effect === "heal2" ? 2 : 1;
+      const canBuy = score >= item.cost && health < maxHealth;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "path-card" + (canBuy ? "" : " disabled");
       btn.disabled = !canBuy;
-      const price = item.hpCost ? `${item.hpCost} ♥` : `${item.cost} pts`;
-      btn.innerHTML = `<span class="skill-name">${item.name}</span><span class="skill-desc">${item.desc}</span><span class="skill-cost">${price}</span>`;
-      btn.addEventListener("click", () => { if (canBuy) onBuy(item); });
+      const priceNote = health >= maxHealth ? "Full HP" : `${item.cost} pts`;
+      btn.innerHTML = `
+        <span class="skill-name">${item.name}</span>
+        <span class="skill-desc">${item.desc}${healAmt > 1 ? ` (+${healAmt})` : ""}</span>
+        <span class="skill-cost">${priceNote}</span>
+      `;
+      btn.addEventListener("click", () => {
+        if (canBuy) onBuy(item);
+      });
       grid.appendChild(btn);
     }
+
+    if (upgrade) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "path-card shop-rare-card";
+      const canBuy = score >= (upgrade.cost ?? 900);
+      if (!canBuy) {
+        btn.classList.add("disabled");
+        btn.disabled = true;
+      }
+      btn.innerHTML = `
+        <span class="skill-name">✦ ${upgrade.name}</span>
+        <span class="skill-desc">${upgrade.desc}</span>
+        <span class="skill-cost">${upgrade.cost ?? 900} pts</span>
+      `;
+      btn.addEventListener("click", () => {
+        if (canBuy) onBuy({ effect: "rare_upgrade", upgradeId: upgrade.id, cost: upgrade.cost ?? 900, name: upgrade.name });
+      });
+      grid.appendChild(btn);
+    }
+
     this.shopContainer.querySelector("#leave-shop").addEventListener("click", () => {
       this.shopContainer.classList.add("hidden");
       this.shopContainer.innerHTML = "";

@@ -35,6 +35,7 @@ export class RoomManager {
     this.chanceOutcome = null;
     this.bonusOutcome = null;
     this.challengeMods = null;
+    this._lastHazardIntensity = 0;
   }
 
   get scaledEnemyFireMult() {
@@ -63,7 +64,10 @@ export class RoomManager {
 
   _spawnEnemy(type, x, z, scale) {
     const finalType = maybeRollChairType(type);
-    this.enemies.push(new Enemy(this.scene, finalType, x, z, scale));
+    const enemy = new Enemy(this.scene, finalType, x, z, scale);
+    enemy.onDeathSound = this.onEnemyDeathSound;
+    enemy.onDeathVisual = this.onEnemyDeathVisual;
+    this.enemies.push(enemy);
   }
 
   reset() {
@@ -90,6 +94,7 @@ export class RoomManager {
   }
 
   _buildArenaHazards(intensity = 1) {
+    this._lastHazardIntensity = intensity;
     this.arenaHazards?.build(this.arena, intensity);
   }
 
@@ -150,7 +155,10 @@ export class RoomManager {
     if (type === PATH_TYPES.BOSS) {
       const variant = ["stalker", "orbiter", "dasher"][Math.floor(Math.random() * 3)];
       const p = this.arena.randomEnemyPoint();
-      this.enemies.push(new Boss(this.scene, p.x, p.z, variant, this.bossDefeatsThisRun > 0));
+      const boss = new Boss(this.scene, p.x, p.z, variant, this.bossDefeatsThisRun > 0);
+      boss.onDeathSound = this.onEnemyDeathSound;
+      boss.onDeathVisual = this.onEnemyDeathVisual;
+      this.enemies.push(boss);
       this.bossIntroTimer = 2.5;
       this._buildArenaHazards(1.2);
     } else if (type === PATH_TYPES.MINIBOSS) {
@@ -161,7 +169,10 @@ export class RoomManager {
         this._spawnEnemy(t, p.x, p.z, this.healthScale);
       }
       const elitePt = this.arena.randomEnemyPoint();
-      this.enemies.push(new Enemy(this.scene, "elite", elitePt.x, elitePt.z, this.healthScale * 1.3));
+      const elite = new Enemy(this.scene, "elite", elitePt.x, elitePt.z, this.healthScale * 1.3);
+      elite.onDeathSound = this.onEnemyDeathSound;
+      elite.onDeathVisual = this.onEnemyDeathVisual;
+      this.enemies.push(elite);
       this._buildArenaHazards(1);
     } else if (type === PATH_TYPES.HARD) {
       this._spawnCombatEnemies(1.35, +2);
@@ -307,7 +318,7 @@ export class RoomManager {
     this.spawnRoom(type);
   }
 
-  update(dt, player, bulletPool) {
+  update(dt, player, bulletPool, enemyMoveMult = 1) {
     this._player = player;
 
     if (this.bossIntroTimer > 0) this.bossIntroTimer -= dt;
@@ -318,7 +329,16 @@ export class RoomManager {
     if (this.state === "fighting") {
       if (this.bossIntroTimer <= 0) {
         for (const enemy of this.enemies) {
-          enemy.update(dt, player, bulletPool, this.enemies, this.arena, this.hazardSystem, this.scaledEnemyFireMult);
+          enemy.update(
+            dt,
+            player,
+            bulletPool,
+            this.enemies,
+            this.arena,
+            this.hazardSystem,
+            this.scaledEnemyFireMult,
+            enemyMoveMult
+          );
         }
         this.arenaHazards?.update(dt, player, bulletPool);
       }

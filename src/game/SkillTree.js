@@ -24,7 +24,7 @@ export const SKILLS = [
   {
     id: "firerate",
     name: "Rapid Fire",
-    description: "+12% fire rate",
+    description: "+8% fire rate",
     cost: 950,
     maxLevel: 3,
     costScale: 1.85,
@@ -35,7 +35,7 @@ export const SKILLS = [
   {
     id: "surge",
     name: "Adrenal Surge",
-    description: "+25% fire rate below 2 HP",
+    description: "+12% fire rate below 2 HP",
     cost: 1400,
     maxLevel: 2,
     costScale: 1.9,
@@ -46,7 +46,7 @@ export const SKILLS = [
   {
     id: "damage",
     name: "Power Core",
-    description: "+1 bullet damage",
+    description: "+0.5 bullet damage",
     cost: 1500,
     maxLevel: 2,
     costScale: 2.2,
@@ -55,9 +55,20 @@ export const SKILLS = [
     requires: ["speed", "firerate"],
   },
   {
+    id: "ability_haste",
+    name: "Rift Tuning",
+    description: "−10% ability cooldown",
+    cost: 1900,
+    maxLevel: 2,
+    costScale: 2.0,
+    row: 2,
+    col: 4,
+    requires: ["firerate"],
+  },
+  {
     id: "crit",
     name: "Keen Eye",
-    description: "+8% crit chance",
+    description: "+5% crit chance",
     cost: 1800,
     maxLevel: 3,
     costScale: 2.0,
@@ -69,7 +80,7 @@ export const SKILLS = [
   {
     id: "lifesteal",
     name: "Siphon",
-    description: "Heal on kill (10%)",
+    description: "Heal on kill (7%)",
     cost: 1800,
     maxLevel: 2,
     costScale: 2.1,
@@ -81,7 +92,7 @@ export const SKILLS = [
   {
     id: "evasion",
     name: "Phase Shift",
-    description: "+0.15s invincibility",
+    description: "+0.12s invincibility",
     cost: 1700,
     maxLevel: 2,
     costScale: 2.0,
@@ -93,7 +104,7 @@ export const SKILLS = [
   {
     id: "crit2",
     name: "Dead Center",
-    description: "+12% crit chance",
+    description: "+8% crit chance",
     cost: 2200,
     maxLevel: 2,
     costScale: 2.2,
@@ -130,7 +141,7 @@ export const SKILLS = [
     id: "pierce_meta",
     name: "Piercing Mind",
     description: "+1 pierce on start",
-    cost: 2400,
+    cost: 2800,
     maxLevel: 1,
     costScale: 1,
     row: 5,
@@ -177,14 +188,25 @@ export const SKILLS = [
   {
     id: "capstone",
     name: "Apex Hunter",
-    description: "+2 damage, +1 HP",
-    cost: 4000,
+    description: "+1 damage, +1 HP",
+    cost: 4500,
     maxLevel: 1,
     costScale: 1,
     row: 6,
     col: 2,
     requires: ["crit2", "heal_power", "dodge"],
     requiresAnyBranch: true,
+  },
+  {
+    id: "focus_core",
+    name: "Focus Core",
+    description: "−5% ability cooldown",
+    cost: 2600,
+    maxLevel: 1,
+    costScale: 1,
+    row: 6,
+    col: 4,
+    requires: ["ability_haste"],
   },
 ];
 
@@ -203,20 +225,23 @@ export function getSkillBonuses(meta) {
   const dodge = meta.getSkillLevel("dodge");
   const capstone = meta.getSkillLevel("capstone");
   const surge = meta.getSkillLevel("surge");
+  const abilityHaste = meta.getSkillLevel("ability_haste");
+  const focusCore = meta.getSkillLevel("focus_core");
 
   return {
     maxHealthBonus: health + (capstone > 0 ? 1 : 0),
     speedMult: 1 + speed * 0.1 + dodge * 0.05,
-    fireRateMult: 1 + firerate * 0.12,
-    damageBonus: damage + (capstone > 0 ? 2 : 0),
-    critChance: meta.getSkillLevel("crit") * 0.08 + meta.getSkillLevel("crit2") * 0.12,
-    lifestealChance: lifesteal * 0.1,
-    invincibleBonus: evasion * 0.15,
+    fireRateMult: 1 + firerate * 0.08,
+    damageBonus: damage * 0.5 + (capstone > 0 ? 1 : 0),
+    critChance: meta.getSkillLevel("crit") * 0.05 + meta.getSkillLevel("crit2") * 0.08,
+    lifestealChance: lifesteal * 0.07,
+    invincibleBonus: evasion * 0.12,
     startPierce: meta.getSkillLevel("pierce_meta") > 0 ? 1 : 0,
     startHoming: meta.getSkillLevel("homing_meta") > 0,
     startBounce: meta.getSkillLevel("ricochet_meta") > 0,
     startAoe: meta.getSkillLevel("aoe_meta") > 0,
     surgeLevels: surge,
+    abilityCooldownMult: Math.max(0.55, 1 - abilityHaste * 0.1 - focusCore * 0.05),
   };
 }
 

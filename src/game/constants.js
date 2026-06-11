@@ -1,5 +1,4 @@
 export const ARENA_SIZE = 32;
-export const WALL_HEIGHT = 4;
 
 export const PLAYER_SPEED = 10;
 export const PLAYER_RADIUS = 0.45;
@@ -12,8 +11,12 @@ export const ENEMY_BULLET_SPEED = 9;
 export const ENEMY_BULLET_RADIUS = 0.18;
 export const PLAYER_BULLET_RADIUS = 0.14;
 
+/** Cap live bullets to keep crowded rooms playable. */
+export const MAX_BULLETS = 350;
+export const MAX_ENEMY_BULLETS = 260;
+export const MAX_PLAYER_BULLETS = 100;
+
 export const INVINCIBLE_TIME = 1.2;
-export const ROOM_TRANSITION_TIME = 1.5;
 
 /** Saturated retro-arcade palette — flat, no PBR */
 export const COLORS = {
@@ -29,7 +32,6 @@ export const COLORS = {
   laserWarn: 0xffaa00,
   floor: 0x2a1050,
   floorAlt: 0x3a1870,
-  wall: 0xff44aa,
   grid: 0xff66cc,
   cover: 0x6622aa,
   splitter: 0xff66ff,

@@ -18,12 +18,19 @@ import { ChanceRoomUI } from "./ChanceRoomUI.js";
 import { Background } from "./Background.js";
 import { applyStatus, updateStatuses } from "./StatusEffects.js";
 import { segmentHitsCircle } from "./BeamUtils.js";
-import { PathUI, PATH_TYPES, MINIBOSS_DROPS, SCORE_MULTIPLIER, SHOP_RARE_CHANCE } from "./PathUI.js";
-import { getChallenge, tryCompleteChallenge } from "./Challenges.js";
+import { PathUI, PATH_TYPES, MINIBOSS_DROPS, SCORE_MULTIPLIER, SHOP_UPGRADE_CHANCE } from "./PathUI.js";
+import { getChallenge, tryCompleteChallenge, getChallengeRewardLabel } from "./Challenges.js";
 import { createRunAchievementState, evaluateAchievements } from "./Achievements.js";
 import { AchievementsUI } from "./AchievementsUI.js";
 import { ChallengesUI } from "./ChallengesUI.js";
 import { UnlockItemsUI } from "./UnlockItemsUI.js";
+import { AbilitiesUI } from "./AbilitiesUI.js";
+import { AbilitySystem } from "./AbilitySystem.js";
+import { isAbilityUnlocked, getAbility } from "./Abilities.js";
+import { AudioManager } from "./AudioManager.js";
+import { DebrisSystem } from "./DebrisSystem.js";
+import { ComboSystem } from "./ComboSystem.js";
+import { createRunSnapshot, restoreRunSnapshot } from "./RunSnapshot.js";
 import {
   PLAYER_RADIUS,
   ENEMY_BULLET_RADIUS,
@@ -39,6 +46,8 @@ export class Game {
     this.running = false;
     this.score = 0;
     this.shakeTimer = 0;
+    this.combatBleedTimer = 0;
+    this.roomClearPulse = 0;
     this.meta = new SaveManager();
     this.deathHandled = false;
     this.idleLoop = true;
@@ -46,8 +55,10 @@ export class Game {
     this.activeChallenge = null;
     this.runAch = createRunAchievementState();
     this.newUnlockToast = [];
-
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
+    this.audio = new AudioManager();
+    this.combo = new ComboSystem();
+    this._musicTrack = null;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -67,12 +78,24 @@ export class Game {
     this.arena = new Arena(this.scene);
     this.player = new Player(this.scene);
     this.bulletPool = new BulletPool(this.scene);
+    this.debris = new DebrisSystem(this.scene);
     this.companions = new CompanionSystem(this.scene);
     this.hazardSystem = new HazardSystem(this.scene);
     this.arenaHazards = new ArenaHazards(this.scene);
+    this.abilitySystem = new AbilitySystem(this.scene);
     this.roomManager = new RoomManager(this.scene, this.arena);
     this.roomManager.hazardSystem = this.hazardSystem;
     this.roomManager.arenaHazards = this.arenaHazards;
+    this.roomManager.onEnemyDeathSound = (entity) => {
+      this.combo.onKill();
+      this.audio.playSquish(
+        entity?.type === "boss" || entity?.type === "elite",
+        this.combo.squishPitch
+      );
+    };
+    this.roomManager.onEnemyDeathVisual = (entity) => {
+      this.debris.spawnFromEnemy(entity);
+    };
 
     this.roomManager.onBossDefeated = () => this.onBossDefeated();
     this.roomManager.onPathChoice = (options, onPick) => this.showPathChoice(options, onPick);
@@ -80,13 +103,18 @@ export class Game {
     this.roomManager.onMinibossDrop = () => this.offerMinibossDrop();
     this.roomManager.onRoomCleared = (floor, bonus) => {
       if (bonus > 0) this.addScore(bonus);
+      this.combo.reset();
       this.onCombatRoomCleared();
+      this.roomClearPulse = 0.35;
       this.tryCompleteActiveChallenge(floor);
     };
     this.roomManager.onRoomReady = () => {
+      this.debris.clear();
       this.runAch.roomDamageTaken = false;
       this.runAch.bossDamageTaken = false;
       this.player.respawnPosition();
+      this.player.onRoomStart();
+      this.abilitySystem.onRoomStart();
     };
     this.roomManager.onMinigameStart = (mode) => {
       this.minigameUI.start(mode, (result) => {
@@ -126,7 +154,7 @@ export class Game {
           this.deathHandled = true;
           this.onPlayerDeath();
         }
-      });
+      }, { playerHealth: this.player.health });
     };
 
     this.pathUI = new PathUI(ui.pathPanel, ui.shopPanel);
@@ -169,6 +197,12 @@ export class Game {
       ui.itemsContainer,
       () => this.refreshMenu()
     );
+    this.abilitiesUI = new AbilitiesUI(
+      this.meta,
+      ui.abilitiesPanel,
+      ui.abilitiesContainer,
+      () => this.refreshMenu()
+    );
     this.shopRareUpgrade = null;
     this.runUpgradeUI = new RunUpgradeUI(ui.draftPanel, () => {
       this.companions.sync(this.player.runState, this.player);
@@ -176,18 +210,48 @@ export class Game {
       this.player.syncAuraVisual();
     });
 
-    this.bindWeaponSelect();
     this.bindWeaponKeys();
+    this.bindRunButtons();
     this.bindSaveSlots();
     this.bindBackToSaves();
+    this.bindAudioSliders();
     this.bindPause();
     window.addEventListener("resize", () => this.onResize());
-    this.showSaveSelectView();
+    window.addEventListener("pagehide", () => {
+      if (this.running) this.suspendRun();
+      this.meta.saveAll();
+    });
+    if (this.meta.getLastMenuView() === "profile") {
+      this.showSaveProfileView();
+    } else {
+      this.showSaveSelectView();
+    }
     this.startIdleRender();
   }
 
   bindBackToSaves() {
     this.ui.backToSavesBtn?.addEventListener("click", () => this.showSaveSelectView());
+  }
+
+  bindAudioSliders() {
+    const music = this.ui.musicVolume;
+    const sfx = this.ui.sfxVolume;
+    if (!music || !sfx) return;
+
+    music.value = String(this.audio.getMusicVolumePercent());
+    sfx.value = String(this.audio.getSfxVolumePercent());
+
+    const onMusic = () => {
+      this.audio.setMusicVolume(parseInt(music.value, 10) / 100);
+      this.unlockAudio();
+    };
+    const onSfx = () => {
+      this.audio.setSfxVolume(parseInt(sfx.value, 10) / 100);
+      this.unlockAudio();
+    };
+
+    music.addEventListener("input", onMusic);
+    sfx.addEventListener("input", onSfx);
   }
 
   closeAllMenuTabs() {
@@ -197,6 +261,7 @@ export class Game {
       this.achievementsUI,
       this.challengesUI,
       this.unlockItemsUI,
+      this.abilitiesUI,
     ]) {
       ui.setOpen(false);
     }
@@ -210,6 +275,7 @@ export class Game {
       achievements: this.achievementsUI,
       challenges: this.challengesUI,
       items: this.unlockItemsUI,
+      abilities: this.abilitiesUI,
     };
     map[tab]?.setOpen(true);
   }
@@ -217,20 +283,36 @@ export class Game {
   showSaveSelectView() {
     this.ui.saveSelectView?.classList.remove("hidden");
     this.ui.saveProfileView?.classList.add("hidden");
+    this.ui.backToSavesBtn?.classList.add("hidden");
     this.ui.overlayTitle.textContent = "Bullet Hell 3D";
+    this.ui.overlayTitle.classList.remove("victory-title");
     this.ui.overlayText.textContent = "Choose a save file to manage skills, weapons, and progress.";
+    this.meta.setLastMenuView("select");
     this.closeAllMenuTabs();
     this.renderSaveSlots();
+    this.updateSaveWarning();
   }
 
   showSaveProfileView() {
     this.ui.saveSelectView?.classList.add("hidden");
     this.ui.saveProfileView?.classList.remove("hidden");
+    this.ui.backToSavesBtn?.classList.remove("hidden");
     const slot = this.meta.getActiveSlotIndex() + 1;
     this.ui.overlayTitle.textContent = `Save ${slot}`;
     this.ui.overlayText.textContent = "Spend bank score, pick loadout, then start your run.";
+    this.meta.setLastMenuView("profile");
     this.openMenuTab("skills");
     this.refreshMenu();
+    this.updateSaveWarning();
+    if (this.audio.unlocked) this.audio.playMenu();
+  }
+
+  updateSaveWarning() {
+    if (!this.ui.overlayText) return;
+    if (!this.meta.storageAvailable()) {
+      this.ui.overlayText.textContent =
+        "Warning: browser storage blocked — progress will not persist after closing this tab.";
+    }
   }
 
   bindSaveSlots() {
@@ -238,11 +320,13 @@ export class Game {
       const btn = e.target.closest("[data-slot]");
       if (!btn) return;
       this.meta.setActiveSlot(parseInt(btn.dataset.slot, 10));
+      this.unlockAudio();
       this.showSaveProfileView();
     });
   }
 
   renderSaveSlots() {
+    if (!this.ui.saveSlots) return;
     this.ui.saveSlots.innerHTML = "";
     for (let i = 0; i < SLOT_COUNT; i++) {
       const s = this.meta.getSlotSummary(i);
@@ -255,8 +339,29 @@ export class Game {
     }
   }
 
-  bindWeaponSelect() {
-    // Weapon selection handled by WeaponTabUI
+  bindRunButtons() {
+    this.ui.continueRunBtn?.addEventListener("click", () => {
+      this.audio.unlock();
+      this.continueRun();
+    });
+  }
+
+  unlockAudio() {
+    this.audio.unlock();
+    this.audio.playMenu();
+  }
+
+  updateRunButtons() {
+    const suspended = !!this.meta.getActiveRun();
+    this.ui.continueRunBtn?.classList.toggle("hidden", !suspended);
+    this.ui.startBtn.textContent = suspended ? "▶ New Run" : "▶ Start Game";
+    if (suspended && this.ui.continueRunHint) {
+      const run = this.meta.getActiveRun();
+      this.ui.continueRunHint.textContent = `Suspended run · Floor ${run?.room?.floorsCleared ?? 0} · ${run?.score ?? 0} pts`;
+      this.ui.continueRunHint.classList.remove("hidden");
+    } else {
+      this.ui.continueRunHint?.classList.add("hidden");
+    }
   }
 
   bindWeaponKeys() {
@@ -281,9 +386,24 @@ export class Game {
     this.achievementsUI.render();
     this.challengesUI.render();
     this.unlockItemsUI.render();
+    this.abilitiesUI.render();
+    this.updateRunButtons();
     const slot = this.meta.getActiveSlotIndex() + 1;
     const ch = this.meta.selectedChallenge ? getChallenge(this.meta.selectedChallenge)?.name : "Normal";
     this.ui.bankScoreMenu.textContent = `Save ${slot} · Bank: ${this.meta.bankScore} pts · Best floor: ${this.meta.maxFloorsCleared} · Run: ${ch}`;
+  }
+
+  updateChallengeBleed(dt) {
+    const interval = this.activeChallenge?.mods?.combatBleed;
+    if (!interval || this.roomManager.state !== "fighting" || this.roomManager.isBossIntro()) return;
+    if (this.roomManager.isTransitioning?.()) return;
+    this.combatBleedTimer += dt;
+    if (this.combatBleedTimer < interval) return;
+    this.combatBleedTimer = 0;
+    if (this.player.takeDamage(1)) {
+      this.registerPlayerHit();
+      this.shakeTimer = 0.15;
+    }
   }
 
   challengeBlocksUpgrades() {
@@ -315,13 +435,58 @@ export class Game {
   }
 
   tryCompleteActiveChallenge(floorOverride) {
-    if (!this.activeChallenge?.id) return;
+    if (!this.activeChallenge?.id || !this.running) return false;
+    if (this.meta.hasChallengeComplete(this.activeChallenge.id)) return false;
     const completed = tryCompleteChallenge(
       this.meta,
       this.activeChallenge.id,
       this.getChallengeProgressContext(floorOverride)
     );
-    if (completed) this.newUnlockToast.push(`Challenge cleared: ${completed.name}`);
+    if (!completed) return false;
+    this.finishChallengeRun(completed);
+    return true;
+  }
+
+  finishChallengeRun(challenge) {
+    this.setPaused(false);
+    this.running = false;
+    this.meta.clearActiveRun();
+    this.pathUI.hide();
+    this.pathUI.hideShop();
+    this.minigameUI.hide();
+    this.chanceRoomUI.hide();
+    this.ui.draftPanel.classList.add("hidden");
+    this.ui.pauseBtn?.classList.add("hidden");
+
+    const floors = this.roomManager.floorsCleared;
+    const score = this.score;
+    this.meta.addRunScore(score);
+    this.meta.recordFloors(floors);
+    this.meta.selectedChallenge = null;
+    this.activeChallenge = null;
+
+    const rewardLabel = getChallengeRewardLabel(challenge);
+    this.newUnlockToast.push(`Challenge cleared: ${challenge.name}`);
+    this.newUnlockToast.push(`Reward: ${rewardLabel}`);
+
+    this.finalizeRunProgress();
+    this.cleanupRun();
+    this.refreshMenu();
+
+    this.ui.overlayTitle.textContent = "Challenge Complete!";
+    this.ui.overlayTitle.classList.add("victory-title");
+    this.ui.overlayText.textContent = [
+      challenge.name,
+      "",
+      `✦ ${rewardLabel}`,
+      "",
+      `Floor ${floors} · ${score} pts banked`,
+    ].join("\n");
+    this.ui.overlay.classList.remove("hidden");
+    this.showSaveProfileView();
+    this.idleLoop = true;
+    this.audio.playMenu();
+    this.startIdleRender();
   }
 
   finalizeRunProgress() {
@@ -360,6 +525,7 @@ export class Game {
     });
     this.ui.pauseResumeBtn?.addEventListener("click", () => this.setPaused(false));
     this.ui.pauseMenuBtn?.addEventListener("click", () => this.returnToMenu());
+    this.ui.pauseEndRunBtn?.addEventListener("click", () => this.endRunAndBank());
   }
 
   canTogglePause() {
@@ -374,21 +540,27 @@ export class Game {
   setPaused(paused) {
     this.manualPaused = paused;
     this.ui.pausePanel?.classList.toggle("hidden", !paused);
+    this.audio.setPaused(paused);
+  }
+
+  suspendRun() {
+    if (!this.running) return;
+    this.meta.setActiveRun(createRunSnapshot(this));
   }
 
   returnToMenu() {
     this.setPaused(false);
     this.running = false;
+    this.suspendRun();
     this.cleanupRun();
-    this.meta.addRunScore(this.score);
-    this.meta.recordFloors(this.roomManager.floorsCleared);
-    this.finalizeRunProgress();
     this.refreshMenu();
 
-    const extras = this.newUnlockToast.length ? `\n${this.newUnlockToast.join("\n")}` : "";
+    const run = this.meta.getActiveRun();
     this.ui.overlayTitle.textContent = "Bullet Hell 3D";
-    this.ui.overlayText.textContent = `Run ended · Floor ${this.roomManager.floorsCleared} · ${this.score} pts banked${extras}`;
-    this.ui.startBtn.textContent = "Start Game";
+    this.ui.overlayTitle.classList.remove("victory-title");
+    this.ui.overlayText.textContent = run
+      ? `Run suspended · Floor ${run.room?.floorsCleared ?? 0} · ${run.score ?? 0} pts in progress`
+      : "Choose a save file to manage skills, weapons, and progress.";
     this.ui.overlay.classList.remove("hidden");
     this.showSaveProfileView();
     this.ui.pauseBtn?.classList.add("hidden");
@@ -398,6 +570,35 @@ export class Game {
     this.chanceRoomUI.hide();
     this.ui.draftPanel.classList.add("hidden");
     this.idleLoop = true;
+    this.audio.playMenu();
+    this.startIdleRender();
+  }
+
+  endRunAndBank() {
+    if (!this.running) return;
+    this.setPaused(false);
+    this.running = false;
+    this.meta.clearActiveRun();
+    this.cleanupRun();
+    this.meta.addRunScore(this.score);
+    this.meta.recordFloors(this.roomManager.floorsCleared);
+    this.finalizeRunProgress();
+    this.refreshMenu();
+
+    const extras = this.newUnlockToast.length ? `\n${this.newUnlockToast.join("\n")}` : "";
+    this.ui.overlayTitle.textContent = "Run Ended";
+    this.ui.overlayTitle.classList.remove("victory-title");
+    this.ui.overlayText.textContent = `Floor ${this.roomManager.floorsCleared} · ${this.score} pts banked${extras}`;
+    this.ui.overlay.classList.remove("hidden");
+    this.showSaveProfileView();
+    this.ui.pauseBtn?.classList.add("hidden");
+    this.pathUI.hide();
+    this.pathUI.hideShop();
+    this.minigameUI.hide();
+    this.chanceRoomUI.hide();
+    this.ui.draftPanel.classList.add("hidden");
+    this.idleLoop = true;
+    this.audio.playMenu();
     this.startIdleRender();
   }
 
@@ -446,7 +647,19 @@ export class Game {
 
   resolveChanceOutcome(result) {
     switch (result.outcome) {
+      case "wither":
+        this.player.runState.speedMult *= 0.95;
+        this.player.runState.fireRateMult *= 0.95;
+        result.desc = "Oracle saps your vigor — −5% move & fire rate this run";
+        break;
       case "damage": {
+        if (this.player.health <= 1) {
+          this.player.runState.speedMult *= 0.95;
+          this.player.runState.fireRateMult *= 0.95;
+          result.outcome = "wither";
+          result.desc = "Oracle saps your vigor — −5% move & fire rate this run";
+          break;
+        }
         this.player.damageBuffer = 0;
         this.player.health = Math.max(0, this.player.health - 1);
         if (this.player.health <= 0) {
@@ -503,7 +716,7 @@ export class Game {
     }
     if (this.challengeBlocksUpgrades()) {
       this.shopRareUpgrade = null;
-    } else if (Math.random() < SHOP_RARE_CHANCE) {
+    } else if (Math.random() < SHOP_UPGRADE_CHANCE) {
       const picks = pickUpgradeChoices(this.player.runState, 1);
       this.shopRareUpgrade = picks[0] ? { ...picks[0], cost: 900 } : null;
     } else {
@@ -512,6 +725,7 @@ export class Game {
     this.pathUI.showShop(
       this.score,
       this.player.health,
+      this.player.maxHealth,
       (item) => this.buyShopItem(item),
       () => {
         this.pathUI.hideShop();
@@ -536,43 +750,12 @@ export class Game {
       return;
     }
 
-    if (item.hpCost) {
-      if (this.player.health <= item.hpCost) return;
-      this.player.health -= item.hpCost;
-    } else if (this.score < item.cost) return;
-    else this.score -= item.cost;
-
-    switch (item.effect) {
-      case "heal":
-        this.player.health = Math.min(this.player.maxHealth, this.player.health + 1);
-        break;
-      case "heal2":
-        this.player.health = Math.min(this.player.maxHealth, this.player.health + 2);
-        break;
-      case "damage":
-        this.player.runState.damageBonus += 1;
-        break;
-      case "speed":
-        this.player.runState.speedMult *= 1.1;
-        break;
-      case "firerate":
-        this.player.runState.fireRateMult *= 1.12;
-        break;
-      case "range":
-        this.player.runState.rangeMult *= 1.15;
-        break;
-      case "pierce":
-        this.player.runState.bulletMods.add("pierce");
-        this.player.runState.pierceCount = Math.max(this.player.runState.pierceCount, 1);
-        break;
-      case "maxhp":
-        this.player.runState.maxHealthBonus += 1;
-        this.player.maxHealth = this.player.getEffectiveMaxHealth();
-        break;
-      case "shield":
-        this.player.runState.orbitalShield = Math.max(this.player.runState.orbitalShield, 1);
-        this.companions.sync(this.player.runState, this.player);
-        break;
+    if (this.score < item.cost || this.player.health >= this.player.maxHealth) return;
+    this.score -= item.cost;
+    if (item.effect === "heal2") {
+      this.player.health = Math.min(this.player.maxHealth, this.player.health + 2);
+    } else {
+      this.player.health = Math.min(this.player.maxHealth, this.player.health + 1);
     }
     this.openShop();
   }
@@ -605,6 +788,8 @@ export class Game {
   cleanupRun() {
     this.roomManager.clearEnemies();
     this.bulletPool.clear();
+    this.debris.clear();
+    this.combo.reset();
     this.hazardSystem.clear();
     this.arenaHazards.clear();
     this.particles.forEach((p) => {
@@ -616,10 +801,48 @@ export class Game {
     this.player.group.visible = true;
     this.player.alive = true;
     this.companions.clear();
+    this.abilitySystem.resetTransient();
+    this.player.abilityShieldTimer = 0;
+  }
+
+  applyRunAbility() {
+    const id = this.meta.selectedAbility;
+    if (id && isAbilityUnlocked(this.meta, getAbility(id))) {
+      this.abilitySystem.setAbility(id);
+    } else {
+      this.abilitySystem.setAbility(null);
+    }
+    this.abilitySystem.cooldown = 0;
+    this.abilitySystem.deathBeamUsed = false;
+    this.abilitySystem.chronoSlowTimer = 0;
+    this.abilitySystem.gravityWellTimer = 0;
+    this.abilitySystem.overclockBuff = 0;
   }
 
   start() {
     if (this.running && !this.deathHandled) return;
+    this.meta.clearActiveRun();
+    this.beginNewRun();
+  }
+
+  continueRun() {
+    if (this.running && !this.deathHandled) return;
+    const snapshot = this.meta.getActiveRun();
+    if (!snapshot) return;
+    this.idleLoop = false;
+    this.running = true;
+    this.deathHandled = false;
+    this.newUnlockToast = [];
+    this.cleanupRun();
+
+    const resumeUi = restoreRunSnapshot(this, snapshot);
+    if (resumeUi === false) return;
+    this.applyRunAbility();
+    this.meta.clearActiveRun();
+    this.enterGameplay(resumeUi);
+  }
+
+  beginNewRun() {
     this.idleLoop = false;
     this.running = true;
     this.deathHandled = false;
@@ -637,11 +860,17 @@ export class Game {
       challengeMods: this.activeChallenge?.mods,
       relicId: this.meta.selectedRelic,
     });
+    this.applyRunAbility();
     this.companions.sync(this.player.runState, this.player);
     this.arena.setGridColor(COLORS.grid);
+    this.enterGameplay(null);
+  }
+
+  enterGameplay(resumeUi) {
     this.clock.start();
 
     this.ui.overlay.classList.add("hidden");
+    this.ui.backToSavesBtn?.classList.add("hidden");
     this.closeAllMenuTabs();
     this.ui.draftPanel.classList.add("hidden");
     this.pathUI.hide();
@@ -650,14 +879,40 @@ export class Game {
     this.chanceRoomUI.hide();
     this.setPaused(false);
     this.ui.pauseBtn?.classList.remove("hidden");
-    this.ui.startBtn.textContent = "Start Game";
 
     this.updateHUD();
     this.updateWeaponLabel();
+    this.resumeSuspendedUi(resumeUi);
+    this._musicTrack = "combat";
+    this.audio.playCombat();
     this.loop();
   }
 
+  resumeSuspendedUi(resumeUi) {
+    if (!resumeUi) return;
+    if (resumeUi === "pathSelect") {
+      this.roomManager.offerPaths();
+      return;
+    }
+    if (resumeUi === "shop") {
+      this.openShop();
+      return;
+    }
+    if (resumeUi === "minigame-rest") {
+      this.roomManager.onMinigameStart?.("rest");
+      return;
+    }
+    if (resumeUi === "minigame-bonus") {
+      this.roomManager.onMinigameStart?.("bonus");
+      return;
+    }
+    if (resumeUi === "chance") {
+      this.roomManager.onChanceRoomStart?.();
+    }
+  }
+
   onBossDefeated() {
+    this.combo.reset();
     this.runAch.bossesThisRun++;
     if (!this.runAch.bossDamageTaken) {
       this.meta.recordLifetime((lt) => {
@@ -676,6 +931,7 @@ export class Game {
     const paletteIdx = this.player.runState.bossDefeatsThisRun % GRID_PALETTES.length;
     this.arena.setGridColor(GRID_PALETTES[paletteIdx]);
     this.tryCompleteActiveChallenge();
+    if (!this.running) return;
 
     const afterBoss = () => {
       this.companions.sync(this.player.runState, this.player);
@@ -692,6 +948,7 @@ export class Game {
 
   onPlayerDeath() {
     this.running = false;
+    this.meta.clearActiveRun();
     this.minigameUI.hide();
     this.chanceRoomUI.hide();
     this.cleanupRun();
@@ -702,12 +959,13 @@ export class Game {
 
     const extras = this.newUnlockToast.length ? `\n${this.newUnlockToast.join("\n")}` : "";
     this.ui.overlayTitle.textContent = "Game Over";
+    this.ui.overlayTitle.classList.remove("victory-title");
     this.ui.overlayText.textContent = `Floor ${this.roomManager.floorsCleared} · ${this.score} pts banked${extras}`;
-    this.ui.startBtn.textContent = "Try Again";
     this.ui.overlay.classList.remove("hidden");
     this.showSaveProfileView();
     this.ui.pauseBtn?.classList.add("hidden");
     this.idleLoop = true;
+    this.audio.playMenu();
     this.startIdleRender();
   }
 
@@ -716,6 +974,7 @@ export class Game {
       if (!this.idleLoop) return;
       requestAnimationFrame(tick);
       this.background.update(0.016);
+      this.arena.updateDecorations(0.016);
       this.render();
     };
     tick();
@@ -744,30 +1003,64 @@ export class Game {
     }
     if (this.isGameplayBlocked()) return;
 
-    this.background.update(dt);
+    this.updateChallengeBleed(dt);
+    if (this.roomClearPulse > 0) this.roomClearPulse -= dt;
+
+    this.combo.update(dt);
 
     const transitioning = this.roomManager.isTransitioning();
     const bossIntro = this.roomManager.isBossIntro();
+    const inCombat =
+      this.roomManager.state === "fighting" && !transitioning && !bossIntro && !this.isGameplayBlocked();
+    const simDt = inCombat ? dt * this.combo.gameSpeedMult : dt;
 
-    if (!transitioning && !bossIntro) {
-      this.player.update(dt, this.input, this.camera, this.canvas, this.bulletPool);
+    this.background.update(dt);
+    this.arena.updateDecorations(dt);
+
+    if (this.roomManager.isBossRoom && this.roomManager.state === "fighting") {
+      if (this._musicTrack !== "boss") {
+        this._musicTrack = "boss";
+        this.audio.playBoss();
+      }
+    } else if (this.running && this._musicTrack !== "combat") {
+      this._musicTrack = "combat";
+      this.audio.playCombat();
+    }
+
+    this.player.comboDamageMult = this.combo.damageMult;
+    this.player.comboFireRateMult = this.combo.fireRateMult;
+
+    if (!transitioning && !bossIntro && !this.isGameplayBlocked()) {
+      this.player.update(simDt, this.input, this.camera, this.canvas, this.bulletPool);
       this.player.updateDebuffs(dt);
       this.player.syncAuraVisual();
-      this.hazardSystem.updatePlayerTrail(this.player, this.player.runState, dt);
-      this.hazardSystem.updateAura(this.player, this.player.runState, this.roomManager.enemies, dt);
-      this.companions.update(dt, this.player, this.bulletPool, this.roomManager.enemies);
+      this.abilitySystem.update(
+        simDt,
+        this.player,
+        this.input,
+        this.camera,
+        this.canvas,
+        this.arena,
+        this.bulletPool,
+        this.roomManager.enemies,
+        (enemy) => this.onEnemyKilled(enemy)
+      );
+      this.hazardSystem.updatePlayerTrail(this.player, this.player.runState, simDt);
+      this.hazardSystem.updateAura(this.player, this.player.runState, this.roomManager.enemies, simDt);
+      this.companions.update(simDt, this.player, this.bulletPool, this.roomManager.enemies);
     }
 
-    this.bulletPool.update(dt, this.player, this.roomManager.enemies, this.arena, this.bulletPool);
+    this.bulletPool.update(simDt, this.player, this.roomManager.enemies, this.arena, this.bulletPool);
     this.bulletPool.cullOffscreen(this.arena);
-    this.hazardSystem.update(dt, this.player, this.roomManager.enemies);
+    this.hazardSystem.update(simDt, this.player, this.roomManager.enemies);
     for (const enemy of this.roomManager.enemies) {
-      if (enemy.alive && enemy.statuses) updateStatuses(enemy, dt);
+      if (enemy.alive && enemy.statuses) updateStatuses(enemy, simDt);
     }
-    this.roomManager.update(dt, this.player, this.bulletPool);
+    this.roomManager.update(simDt, this.player, this.bulletPool, this.abilitySystem.getEnemyMoveMult());
 
     if (!transitioning && !bossIntro) this.checkCollisions();
-    this.updateParticles(dt);
+    this.debris.update(simDt);
+    this.updateParticles(simDt);
     if (this.playerLight) this.playerLight.position.set(this.player.x, 3, this.player.z);
     if (this.shakeTimer > 0) this.shakeTimer -= dt;
     this.updateHUD();
@@ -829,10 +1122,10 @@ export class Game {
             if (killed) {
               this.addScore(enemy.score);
               this.onEnemyKilled(enemy);
-              if (this.player.bonuses.lifestealChance > 0 && Math.random() < this.player.bonuses.lifestealChance) {
+              const ls = this.player.bonuses.lifestealChance * (this.player.runState.lifestealMult ?? 1);
+              if (ls > 0 && Math.random() < ls) {
                 this.player.health = Math.min(this.player.maxHealth, this.player.health + 1);
               }
-              this.spawnDeathParticles(enemy.x, enemy.z, enemy.config?.color ?? COLORS.boss, enemy.type === "boss" ? 48 : 16);
             }
           }
           continue;
@@ -880,10 +1173,10 @@ export class Game {
             if (killed) {
               this.addScore(enemy.score);
               this.onEnemyKilled(enemy);
-              if (this.player.bonuses.lifestealChance > 0 && Math.random() < this.player.bonuses.lifestealChance) {
+              const ls = this.player.bonuses.lifestealChance * (this.player.runState.lifestealMult ?? 1);
+              if (ls > 0 && Math.random() < ls) {
                 this.player.health = Math.min(this.player.maxHealth, this.player.health + 1);
               }
-              this.spawnDeathParticles(enemy.x, enemy.z, enemy.config?.color ?? COLORS.boss, enemy.type === "boss" ? 48 : 16);
             }
             if (b.pierce > 0) b.pierce--;
             else this.bulletPool.remove(b);
@@ -931,10 +1224,10 @@ export class Game {
         if (killed) {
           this.addScore(enemy.score);
           this.onEnemyKilled(enemy);
-          if (this.player.bonuses.lifestealChance > 0 && Math.random() < this.player.bonuses.lifestealChance) {
+          const ls = this.player.bonuses.lifestealChance * (this.player.runState.lifestealMult ?? 1);
+          if (ls > 0 && Math.random() < ls) {
             this.player.health = Math.min(this.player.maxHealth, this.player.health + 1);
           }
-          this.spawnDeathParticles(enemy.x, enemy.z, enemy.config?.color ?? COLORS.boss, enemy.type === "boss" ? 48 : 16);
         }
         continue;
       }
@@ -1001,7 +1294,11 @@ export class Game {
       document.getElementById("room-label").textContent = "Boss";
     } else {
       bossHud.classList.add("hidden");
-      document.getElementById("room-label").textContent = `Floor ${this.roomManager.floorsCleared + 1}`;
+      const roomLabel = document.getElementById("room-label");
+      if (roomLabel) {
+        roomLabel.textContent = `Floor ${this.roomManager.floorsCleared + 1}`;
+        roomLabel.classList.toggle("hud-pulse", this.roomClearPulse > 0);
+      }
     }
     const fill = document.getElementById("health-bar-fill");
     const text = document.getElementById("health-text");
@@ -1012,11 +1309,33 @@ export class Game {
       text.textContent = `${hp}/${max}`;
     }
     document.getElementById("score-label").textContent = `Score: ${this.score}`;
+    const comboHud = document.getElementById("combo-hud");
+    const comboMult = document.getElementById("combo-mult");
+    const comboFill = document.getElementById("combo-bar-fill");
+    if (comboHud && comboMult && comboFill) {
+      if (this.running && this.combo.active) {
+        comboHud.classList.remove("hidden");
+        comboMult.textContent = `${this.combo.level}x`;
+        comboFill.style.width = `${this.combo.idleFraction * 100}%`;
+      } else {
+        comboHud.classList.add("hidden");
+      }
+    }
     document.getElementById("scale-label").textContent = `HP×${this.roomManager.healthScale.toFixed(1)} · Boss ${Math.max(0, this.roomManager.nextBossIn - this.roomManager.roomsSinceBoss)}`;
     const upgradesEl = document.getElementById("upgrades-label");
     if (upgradesEl) {
       const ch = this.activeChallenge ? ` · ${this.activeChallenge.name}` : "";
       upgradesEl.textContent = getRunUpgradeSummary(this.player.runState) + ch;
+    }
+    const abilityEl = document.getElementById("ability-label");
+    if (abilityEl) {
+      const label = this.abilitySystem.getHudLabel();
+      if (label && this.running) {
+        abilityEl.textContent = label;
+        abilityEl.classList.remove("hidden");
+      } else {
+        abilityEl.classList.add("hidden");
+      }
     }
     const msg = this.roomManager.getMessage();
     const msgEl = document.getElementById("message");

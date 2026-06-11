@@ -37,6 +37,7 @@ export class UnlockItemsUI {
     grid.className = "meta-grid";
 
     for (const item of UNLOCKABLES) {
+      if (item.type === "ability") continue;
       const unlocked = isUnlockGranted(this.meta, item);
       const card = document.createElement("div");
       card.className = "meta-card" + (unlocked ? " meta-done" : " meta-locked");

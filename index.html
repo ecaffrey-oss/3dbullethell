@@ -20,10 +20,15 @@
           </div>
           <span id="score-label" class="hud-chip">Score: 0</span>
           <span id="weapon-label" class="hud-chip">Pulse</span>
+          <div id="combo-hud" class="hud-chip combo-hud hidden">
+            <span id="combo-mult">1x</span>
+            <div id="combo-bar-track"><div id="combo-bar-fill"></div></div>
+          </div>
         </div>
         <div class="hud-bar hud-bar-sub">
           <span id="scale-label" class="hud-chip">HP ×1.0</span>
           <span id="upgrades-label" class="hud-chip hud-upgrades"></span>
+          <span id="ability-label" class="hud-chip hud-ability hidden"></span>
         </div>
       </div>
       <div id="message" class="hidden"></div>
@@ -32,7 +37,7 @@
         <div id="boss-phase">Phase 1</div>
         <div id="boss-bar-track"><div id="boss-bar-fill"></div></div>
       </div>
-      <div id="controls">WASD — Move · Mouse — Aim · Click — Shoot · Shift+1–9 — Weapon · P — Pause</div>
+      <div id="controls">WASD — Move · Mouse — Aim · Click — Shoot · E — Ability · Shift+1–9 — Weapon · P — Pause</div>
     </div>
     <canvas id="game"></canvas>
     <div id="draft-panel" class="hidden"></div>
@@ -47,18 +52,34 @@
           <div class="draft-title">Paused</div>
         </div>
         <button type="button" id="pause-resume-btn" class="menu-btn">Resume</button>
-        <button type="button" id="pause-menu-btn" class="menu-btn menu-btn-secondary">Return to Menu</button>
+        <button type="button" id="pause-menu-btn" class="menu-btn menu-btn-secondary">Suspend Run</button>
+        <button type="button" id="pause-end-run-btn" class="menu-btn menu-btn-secondary">End Run & Bank</button>
       </div>
     </div>
     <div id="overlay">
       <div class="menu-starfield" aria-hidden="true"></div>
+      <button type="button" id="back-to-saves-btn" class="menu-btn menu-btn-secondary hidden">← Saves</button>
+      <div id="save-slots-bar" class="save-slots-bar">
+        <p class="save-slots-heading">Save Files</p>
+        <div id="save-slots"></div>
+      </div>
+      <div id="audio-settings" class="audio-settings">
+        <label class="volume-row">
+          <span class="volume-label">Music</span>
+          <input type="range" id="music-volume" min="0" max="100" value="22" />
+        </label>
+        <label class="volume-row">
+          <span class="volume-label">SFX</span>
+          <input type="range" id="sfx-volume" min="0" max="100" value="50" />
+        </label>
+      </div>
       <div id="overlay-content" class="menu-shell menu-shell-title menu-repel">
         <div class="title-ornament">✦ · ✦ · ✦</div>
         <h1 id="overlay-title">Bullet Hell 3D</h1>
         <p id="overlay-subtitle" class="overlay-subtitle">Roguelike arena shooter</p>
         <p id="overlay-text">Choose a save file to manage skills, weapons, and progress.</p>
         <div id="save-select-view">
-          <div id="save-slots"></div>
+          <p class="save-pick-hint">Select a save slot above to open your profile.</p>
         </div>
         <div id="save-profile-view" class="hidden">
           <p id="bank-score-menu" class="bank-score">Bank: 0 pts</p>
@@ -87,9 +108,16 @@
             <div id="items-panel" class="menu-sub-panel hidden">
               <div id="items-list"></div>
             </div>
+            <div id="abilities-section" class="abilities-section">
+              <button type="button" id="abilities-tab-btn" class="menu-tab-btn abilities-tab-btn">Abilities</button>
+              <div id="abilities-panel" class="menu-sub-panel abilities-panel hidden">
+                <div id="abilities-list"></div>
+              </div>
+            </div>
           </div>
+          <p id="continue-run-hint" class="bank-score hidden"></p>
           <div class="profile-actions">
-            <button type="button" id="back-to-saves-btn" class="menu-btn menu-btn-secondary">← Saves</button>
+            <button type="button" id="continue-run-btn" class="menu-start-btn hidden">▶ Continue Run</button>
             <button id="start-btn" type="button" class="menu-start-btn">▶ Start Game</button>
           </div>
         </div>

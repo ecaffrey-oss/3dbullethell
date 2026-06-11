@@ -71,6 +71,20 @@ export const ACHIEVEMENTS = [
     reward: "relic_thorns",
     check: (ctx) => ctx.runHardClears >= 3,
   },
+  {
+    id: "fortress",
+    name: "Fortress",
+    desc: "Reach floor 12 in a single run",
+    reward: "ability_wall",
+    check: (ctx) => ctx.runFloors >= 12,
+  },
+  {
+    id: "veteran",
+    name: "Veteran",
+    desc: "Defeat 5 bosses across all runs",
+    reward: "ability_turret",
+    check: (ctx) => ctx.lifetimeBosses >= 5,
+  },
 ];
 
 export function createRunAchievementState() {
@@ -121,6 +135,10 @@ export function getAchievementProgress(ach, meta, lifetime = {}) {
       return { done: false, label: "500 kills in one run" };
     case "hard_mode":
       return { done: false, label: "3 hard rooms in one run" };
+    case "fortress":
+      return { done: false, label: `Best floor ${meta.maxFloorsCleared}/12` };
+    case "veteran":
+      return { done: false, label: `${lifetime.bossesDefeated ?? 0}/5 bosses` };
     default:
       return { done: false, label: "—" };
   }

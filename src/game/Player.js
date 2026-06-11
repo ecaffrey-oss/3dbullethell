@@ -22,6 +22,7 @@ export class Player {
     this.fireCooldown = 0;
     this.ramCooldown = 0;
     this.invincibleTimer = 0;
+    this.abilityShieldTimer = 0;
     this.alive = true;
     this.bonuses = { speedMult: 1, fireRateMult: 1, damageBonus: 0, maxHealthBonus: 0 };
     this.weaponId = "pulse";
@@ -33,12 +34,22 @@ export class Player {
     this.shieldMesh = null;
     this.challengeMaxHealth = null;
     this.challengeDamageMult = 1;
+    this.challengeMods = null;
+    this.comboDamageMult = 1;
+    this.comboFireRateMult = 1;
+    this.idleTimer = 0;
+    this.driftAngle = Math.random() * Math.PI * 2;
+    this.animTime = 0;
+    this.roomShootLock = 0;
     this.debuffSlow = 0;
     this.debuffBurn = 0;
     this.debuffPoison = 0;
     this.debuffWeak = 0;
     this.burnTick = 0;
     this.poisonTick = 0;
+    this.dashTimer = 0;
+    this.dashVX = 0;
+    this.dashVZ = 0;
 
     const bodyGeo = new THREE.ConeGeometry(0.35, 0.9, 6);
     bodyGeo.rotateX(Math.PI / 2);
@@ -72,6 +83,7 @@ export class Player {
   }
 
   applyRunSetup({ challengeMods = null, relicId = null } = {}) {
+    this.challengeMods = challengeMods;
     this.challengeMaxHealth = challengeMods?.maxHealthCap ?? null;
     this.challengeDamageMult = challengeMods?.playerDamageMult ?? 1;
     if (relicId) applyRelic(relicId, this);
@@ -122,7 +134,11 @@ export class Player {
   getRamDamage() {
     const w = this.weapon;
     if (!w.ramDamage) return 0;
-    return (w.ramDamage + this.bonuses.damageBonus + this.runState.damageBonus) * (this.challengeDamageMult ?? 1);
+    return (
+      (w.ramDamage + this.bonuses.damageBonus + this.runState.damageBonus) *
+      (this.challengeDamageMult ?? 1) *
+      (this.comboDamageMult ?? 1)
+    );
   }
 
   fireBullet(bulletPool, x, z, dirX, dirZ) {
@@ -131,7 +147,9 @@ export class Player {
 
     const rs = this.runState;
     const damage =
-      (weapon.damage + this.bonuses.damageBonus + rs.damageBonus) * (this.challengeDamageMult ?? 1);
+      (weapon.damage + this.bonuses.damageBonus + rs.damageBonus) *
+      (this.challengeDamageMult ?? 1) *
+      (this.comboDamageMult ?? 1);
     const speed = weapon.speed * rs.rangeMult;
     const opts = {
       pierce: rs.bulletMods.has("pierce") ? rs.pierceCount : 0,
@@ -194,20 +212,48 @@ export class Player {
     }
   }
 
+  onRoomStart() {
+    const delay = this.challengeMods?.roomShootDelay ?? 0;
+    this.roomShootLock = delay;
+  }
+
   update(dt, input, camera, canvas, bulletPool) {
     if (!this.alive) return;
+    this.animTime += dt;
+
+    if (this.roomShootLock > 0) this.roomShootLock -= dt;
 
     if (this.ramCooldown > 0) this.ramCooldown -= dt;
 
     const drawbacks = this.getDrawbacks();
     const speed =
       PLAYER_SPEED * this.bonuses.speedMult * this.runState.speedMult * this.getSpeedMult() * (drawbacks.speedMult ?? 1);
-    const move = input.getMoveDirection();
-    this.x += move.x * speed * dt;
-    this.z += move.z * speed * dt;
+
+    if (this.dashTimer > 0) {
+      this.dashTimer -= dt;
+      this.x += this.dashVX * dt;
+      this.z += this.dashVZ * dt;
+    } else {
+      const move = input.getMoveDirection();
+      if (this.challengeMods?.drift) {
+        this.driftAngle += dt * 0.55;
+        this.x += Math.sin(this.driftAngle) * this.challengeMods.drift * dt;
+        this.z += Math.cos(this.driftAngle * 0.85) * this.challengeMods.drift * dt;
+      }
+      this.x += move.x * speed * dt;
+      this.z += move.z * speed * dt;
+      if (this.challengeMods?.idlePunish) {
+        if (Math.abs(move.x) + Math.abs(move.z) < 0.05) {
+          this.idleTimer += dt;
+          if (this.idleTimer > 0.65) this.debuffSlow = Math.max(this.debuffSlow, 0.55);
+        } else {
+          this.idleTimer = 0;
+        }
+      }
+    }
 
     if (this.arena) {
-      const c = this.arena.clampPlayer(this.x, this.z, PLAYER_RADIUS);
+      const c = this.arena.clampPlayer(this.x, this.z, PLAYER_RADIUS, { ignoreCovers: true });
       this.x = c.x;
       this.z = c.z;
     } else {
@@ -216,9 +262,13 @@ export class Player {
       this.z = THREE.MathUtils.clamp(this.z, -half, half);
     }
 
-    this.group.position.set(this.x, 0.5, this.z);
+    this.group.position.set(this.x, 0.5 + Math.sin(this.animTime * 5) * 0.04, this.z);
     const aim = this.getAimDirection(input, camera, canvas);
     if (aim) this.group.rotation.y = Math.atan2(aim.x, aim.z);
+
+    const bobScale = 1 + Math.sin(this.animTime * 6) * 0.03;
+    this.mesh.scale.set(bobScale, bobScale, bobScale);
+    this.ring.material.opacity = 0.45 + Math.sin(this.animTime * 4) * 0.15;
 
     if (this.invincibleTimer > 0) {
       this.invincibleTimer -= dt;
@@ -230,13 +280,15 @@ export class Player {
     }
 
     if (this.weapon.noShoot) return;
+    if (this.roomShootLock > 0) return;
 
     let fireRate =
       (this.weapon.fireRate / this.bonuses.fireRateMult / this.runState.fireRateMult) *
       (drawbacks.fireRateMult ?? 1);
+    fireRate /= this.comboFireRateMult ?? 1;
     if (this.weapon.multishot) fireRate *= 2.4;
     if (this.health <= 2 && this.bonuses.surgeLevels > 0) {
-      fireRate /= 1 + this.bonuses.surgeLevels * 0.25;
+      fireRate /= 1 + this.bonuses.surgeLevels * 0.12;
     }
     if (!Number.isFinite(fireRate) || fireRate <= 0) fireRate = this.weapon.fireRate;
 
@@ -316,7 +368,7 @@ export class Player {
   }
 
   takeDamage(amount = 1) {
-    if (this.invincibleTimer > 0 || !this.alive) return false;
+    if (this.invincibleTimer > 0 || this.abilityShieldTimer > 0 || !this.alive) return false;
     amount *= this.getIncomingDamageMult();
     this.damageBuffer = (this.damageBuffer ?? 0) + amount;
     if (this.damageBuffer < 1) return false;
@@ -343,6 +395,9 @@ export class Player {
     this.debuffWeak = 0;
     this.burnTick = 0;
     this.poisonTick = 0;
+    this.dashTimer = 0;
+    this.dashVX = 0;
+    this.dashVZ = 0;
     const b = this.bonuses;
     if (b.startPierce) {
       this.runState.bulletMods.add("pierce");
@@ -358,6 +413,7 @@ export class Player {
     this.health = this.maxHealth;
     this.fireCooldown = 0;
     this.invincibleTimer = 0;
+    this.abilityShieldTimer = 0;
     this.alive = true;
     this.group.visible = true;
   }

@@ -11,6 +11,7 @@ export class Background {
     scene.add(this.group);
     this.orbs = [];
     this.particles = [];
+    this.towers = [];
     this.time = 0;
     this.build();
   }
@@ -19,6 +20,7 @@ export class Background {
     while (this.group.children.length) this.group.remove(this.group.children[0]);
     this.orbs = [];
     this.particles = [];
+    this.towers = [];
 
     const sky = new THREE.Mesh(
       new THREE.PlaneGeometry(140, 80),
@@ -76,6 +78,25 @@ export class Background {
       this.orbs.push({ mesh, speed: 0.15 + Math.random() * 0.35, phase: Math.random() * Math.PI * 2 });
     }
 
+    const towerTints = [0x66ccff, 0xaa66ff, 0xff66cc, 0x44ffdd];
+    for (let i = 0; i < 8; i++) {
+      const group = new THREE.Group();
+      const tint = towerTints[i % towerTints.length];
+      const h = 10 + (i % 3) * 4;
+      for (let s = 0; s < 3; s++) {
+        const shard = new THREE.Mesh(
+          new THREE.ConeGeometry(1.6 - s * 0.35, 3.5 - s * 0.5, 4),
+          new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.22 - s * 0.04 })
+        );
+        shard.position.y = 2 + s * 2.8;
+        shard.rotation.y = s * 0.7;
+        group.add(shard);
+      }
+      group.position.set(-46 + i * 13, 0, -34 - (i % 2) * 6);
+      this.group.add(group);
+      this.towers.push({ mesh: group, phase: Math.random() * Math.PI * 2, speed: 0.08 + (i % 3) * 0.03 });
+    }
+
     for (let i = 0; i < 12; i++) {
       const stripe = new THREE.Mesh(
         new THREE.PlaneGeometry(0.35, 8 + Math.random() * 12),
@@ -119,6 +140,12 @@ export class Background {
     for (const o of this.orbs) {
       o.mesh.position.y += Math.sin(this.time * o.speed + o.phase) * dt * 0.6;
       o.mesh.rotation.z += dt * o.speed * 0.3;
+    }
+
+    for (const t of this.towers) {
+      t.mesh.rotation.y += dt * t.speed;
+      const pulse = 1 + Math.sin(this.time * 0.9 + t.phase) * 0.03;
+      t.mesh.scale.set(pulse, pulse, pulse);
     }
 
     for (const p of this.particles) {

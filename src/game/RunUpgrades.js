@@ -18,6 +18,8 @@ export function createRunState() {
     auraRadius: 2.8,
     auraDamage: 0.8,
     ownedUpgrades: new Set(),
+    abilityCooldownMult: 1,
+    lifestealMult: 1,
   };
 }
 

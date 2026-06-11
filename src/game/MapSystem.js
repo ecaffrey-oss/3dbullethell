@@ -120,5 +120,3 @@ export class MapSystem {
     };
   }
 }
-
-export { ROOM_META as MapRoomMeta };

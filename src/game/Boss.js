@@ -61,6 +61,7 @@ export class Boss {
     this.type = "boss";
     this.movementType = movementType;
     this.movement = MOVEMENT[movementType] ?? MOVEMENT.stalker;
+    this._rematch = rematch;
     this.x = x;
     this.z = z;
     this.health = BOSS_MAX_HEALTH;
@@ -283,6 +284,8 @@ export class Boss {
 
   die() {
     this.alive = false;
+    this.onDeathVisual?.(this);
+    this.onDeathSound?.(this);
     this.laserGroup.visible = false;
     this.scene.remove(this.group);
     this.scene.remove(this.laserGroup);

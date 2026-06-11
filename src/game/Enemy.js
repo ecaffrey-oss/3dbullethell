@@ -52,6 +52,8 @@ export class Enemy {
     this.attackToggle = false;
     this.slideDir = Math.random() * Math.PI * 2;
     this.trailTimer = 0;
+    this.hitFlash = 0;
+    this.baseColor = this.config.color;
     if (type === "chair") {
       const angle = Math.random() * Math.PI * 2;
       this.dvdVel = { x: Math.cos(angle), z: Math.sin(angle) };
@@ -110,6 +112,31 @@ export class Enemy {
     this.variantRing = ring;
   }
 
+  forceVariant(kind, status) {
+    if (this.type === "chair" || this.config.pattern === "support") return;
+    this.isVariant = true;
+    this.variantBullet = kind;
+    this.variantStatus = status ?? STATUS_BULLETS[0];
+    const tint = {
+      homing: 0xcc66ff,
+      explosive: 0xffaa22,
+      bounce: 0x44ddff,
+      status: STATUS_TYPES[this.variantStatus]?.color ?? 0xffee44,
+    }[kind];
+    this.config.color = tint;
+    this.mesh.material.color.setHex(tint);
+    if (!this.variantRing) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(this.radius * 0.95, this.radius * 1.15, 12),
+        new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: 0.45, side: THREE.DoubleSide })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = -0.35;
+      this.mesh.add(ring);
+      this.variantRing = ring;
+    }
+  }
+
   createGeometry(type) {
     switch (type) {
       case "turret": return new THREE.CylinderGeometry(0.5, 0.6, 0.8, 8);
@@ -145,12 +172,17 @@ export class Enemy {
     }
   }
 
-  update(dt, player, bulletPool, allEnemies = [], arena = null, hazardSystem = null, enemyFireMult = 1) {
+  update(dt, player, bulletPool, allEnemies = [], arena = null, hazardSystem = null, enemyFireMult = 1, externalMoveMult = 1) {
     if (!this.alive) return;
+    if (this.hitFlash > 0) {
+      this.hitFlash -= dt;
+      this.mesh.material.color.setHex(this.hitFlash > 0 ? 0xffffff : this.baseColor);
+      if (this.hitFlash <= 0) this.mesh.scale.setScalar(this.isElite ? 1.4 : 1);
+    }
     updateStatuses(this, dt);
     if (!this.alive) return;
 
-    const moveMult = this.statusMoveMult;
+    const moveMult = this.statusMoveMult * externalMoveMult;
     const fireMult = this.statusFireMult;
 
     if (this.type === "chair") {
@@ -206,18 +238,18 @@ export class Enemy {
       this.x = this.orbitCenter.x + Math.cos(this.orbitAngle) * 3;
       this.z = this.orbitCenter.z + Math.sin(this.orbitAngle) * 3;
     } else if (this.type === "skater") {
-      this.x += Math.cos(this.slideDir) * this.config.speed * moveMult * dt;
-      this.z += Math.sin(this.slideDir) * this.config.speed * moveMult * dt;
-      if (arena) {
-        const half = arena.half - this.radius - 0.5;
-        if (this.x > half || this.x < -half) {
-          this.slideDir = Math.PI - this.slideDir;
-          this.x = Math.max(-half, Math.min(half, this.x));
-        }
-        if (this.z > half || this.z < -half) {
-          this.slideDir = -this.slideDir;
-          this.z = Math.max(-half, Math.min(half, this.z));
-        }
+      let vx = Math.cos(this.slideDir);
+      let vz = Math.sin(this.slideDir);
+      const spd = this.config.speed * moveMult;
+      this.x += vx * spd * dt;
+      this.z += vz * spd * dt;
+      if (arena?.reflectDvd) {
+        const r = arena.reflectDvd(this.x, this.z, vx, vz, this.radius);
+        this.x = r.x;
+        this.z = r.z;
+        vx = r.vx;
+        vz = r.vz;
+        this.slideDir = Math.atan2(vz, vx);
       }
       this.trailTimer -= dt;
       if (hazardSystem && this.trailTimer <= 0) {
@@ -347,14 +379,31 @@ export class Enemy {
     if (amount <= 0) return false;
 
     this.health -= amount;
+    this.hitFlash = 0.1;
+    this.mesh.material.color.setHex(0xffffff);
+    this.mesh.scale.setScalar((this.isElite ? 1.4 : 1) * 1.12);
     if (this.health <= 0) {
       this.alive = false;
-      this.scene.remove(this.mesh);
-      this.mesh.geometry.dispose();
-      this.mesh.material.dispose();
+      this.onDeathVisual?.(this);
+      this.onDeathSound?.(this);
+      this._removeMesh();
       return true;
     }
     return false;
+  }
+
+  _removeMesh() {
+    if (!this.mesh) return;
+    this.scene.remove(this.mesh);
+    this.mesh.traverse((child) => {
+      if (child.isMesh && child !== this.mesh) {
+        child.geometry?.dispose();
+        child.material?.dispose();
+      }
+    });
+    this.mesh.geometry?.dispose();
+    this.mesh.material?.dispose();
+    this.mesh = null;
   }
 
   get radius() {

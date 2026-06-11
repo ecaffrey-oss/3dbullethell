@@ -1,6 +1,9 @@
-export function rollOracleOutcome() {
+export function rollOracleOutcome(ctx = {}) {
   const r = Math.random();
-  if (r < 0.5) return "damage";
+  if (r < 0.5) {
+    if (ctx.playerHealth <= 1) return "wither";
+    return "damage";
+  }
   if (r < 0.9) return "heal";
   return "item";
 }
@@ -21,6 +24,7 @@ const ROOM_CONFIG = {
     roll: rollOracleOutcome,
     outcomes: {
       damage: { icon: "💀", label: "Curse", desc: "The oracle strikes — lose 1 ♥" },
+      wither: { icon: "🌑", label: "Wither", desc: "Your vigor fades — −5% move & fire rate this run" },
       heal: { icon: "💚", label: "Blessing", desc: "Warm light restores 1 ♥" },
       item: { icon: "🎁", label: "Gift", desc: "A relic materializes in your hands" },
     },
@@ -57,14 +61,16 @@ export class ChanceRoomUI {
     this.lastTs = 0;
     this.boundKey = (e) => this.onContinue(e);
     this.boundClick = () => this.onContinue();
+    this.ctx = {};
   }
 
-  start(roomKind, onComplete) {
+  start(roomKind, onComplete, ctx = {}) {
     this.roomKind = roomKind === "bonus" ? "bonus" : "oracle";
     this.config = ROOM_CONFIG[this.roomKind];
+    this.ctx = ctx;
     this.onComplete = onComplete;
     this.active = true;
-    this.outcome = this.config.roll();
+    this.outcome = this.config.roll(this.ctx);
     this.spinTimer = 0;
     this.phase = "spin";
     this.spinIdx = 0;
@@ -77,15 +83,27 @@ export class ChanceRoomUI {
     this.loop();
   }
 
+  getWheelSlots() {
+    if (this.roomKind !== "oracle" || this.ctx.playerHealth > 1) {
+      return this.config.slots;
+    }
+    return ["wither", "heal", "item"];
+  }
+
   renderShell() {
-    const { badge, title, hint, slots, outcomes } = this.config;
+    const { badge, title, hint, outcomes } = this.config;
+    const slots = this.getWheelSlots();
+    const wheelHint =
+      this.roomKind === "oracle" && this.ctx.playerHealth <= 1
+        ? "At 1 ♥ curses become withering stat drains instead of damage."
+        : hint;
     this.container.innerHTML = `
       <div class="menu-shell menu-repel chance-inner">
         <div class="menu-shell-header">
           <span class="menu-shell-badge">${badge}</span>
           <div class="draft-title">${title}</div>
         </div>
-        <p class="minigame-hint">${hint}</p>
+        <p class="minigame-hint">${wheelHint}</p>
         <div class="chance-wheel" id="chance-wheel">
           ${slots
             .map(
@@ -109,10 +127,11 @@ export class ChanceRoomUI {
 
     if (this.phase === "spin") {
       this.spinTimer += dt;
+      const slots = this.getWheelSlots();
       if (this.spinTimer > 0.12) {
         this.spinTimer = 0;
-        this.spinIdx = (this.spinIdx + 1) % this.config.slots.length;
-        this.highlightSlot(this.config.slots[this.spinIdx]);
+        this.spinIdx = (this.spinIdx + 1) % slots.length;
+        this.highlightSlot(slots[this.spinIdx]);
       }
       if (performance.now() - this._spinStart > 1800) {
         this.reveal();
@@ -131,12 +150,14 @@ export class ChanceRoomUI {
 
   reveal() {
     this.phase = "done";
-    this.highlightSlot(this.outcome);
+    const displayOutcome =
+      this.outcome === "damage" && this.ctx.playerHealth <= 1 ? "wither" : this.outcome;
+    this.highlightSlot(displayOutcome);
     const slots = this.container.querySelectorAll(".chance-slot");
     for (const el of slots) {
-      el.classList.toggle("chance-slot-winner", el.dataset.outcome === this.outcome);
+      el.classList.toggle("chance-slot-winner", el.dataset.outcome === displayOutcome);
     }
-    const meta = this.config.outcomes[this.outcome];
+    const meta = this.config.outcomes[this.outcome] ?? this.config.outcomes[displayOutcome];
     const status = this.container.querySelector("#chance-status");
     if (status) status.textContent = `${meta.icon} ${meta.desc}`;
     const btn = this.container.querySelector("#chance-continue");
@@ -159,8 +180,10 @@ export class ChanceRoomUI {
     this.container.classList.add("hidden");
     this.container.innerHTML = "";
     this._spinStart = null;
-    const meta = this.config.outcomes[this.outcome];
-    this.onComplete?.({ roomKind: this.roomKind, outcome: this.outcome, ...meta });
+    let outcome = this.outcome;
+    if (outcome === "damage" && this.ctx.playerHealth <= 1) outcome = "wither";
+    const meta = this.config.outcomes[outcome];
+    this.onComplete?.({ roomKind: this.roomKind, outcome, ...meta });
   }
 
   hide() {

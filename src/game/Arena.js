@@ -37,6 +37,8 @@ export class Arena {
     this.scene.add(this.group);
     this.covers = [];
     this.splitters = [];
+    this.crystals = [];
+    this.decorTime = 0;
     this.floor = null;
     this.grid = null;
     this.halfX = this.size / 2;
@@ -50,7 +52,7 @@ export class Arena {
     return Math.max(this.halfX, this.halfZ);
   }
 
-  build(size, shapeKey = "square") {
+  build(size, shapeKey = "square", layout = null) {
     this.clear();
     this.size = size;
     const shape = ROOM_SHAPES[shapeKey] ?? ROOM_SHAPES.square;
@@ -62,7 +64,39 @@ export class Arena {
 
     this._buildFloor();
     this._buildShapeGrid();
-    this._buildSplitters();
+
+    if (layout) {
+      this._applyLayout(layout);
+    } else {
+      this._buildSplitters();
+      this._buildCovers();
+      this._buildCrystalTowers();
+    }
+  }
+
+  getLayout() {
+    return {
+      covers: this.covers.map((c) => ({
+        x: c.x,
+        z: c.z,
+        w: (c.hw ?? c.radius) * 2,
+        d: (c.hd ?? c.radius) * 2,
+        shape: c.shape ?? "block",
+      })),
+      splitters: this.splitters.map((s) => ({
+        x: s.x,
+        z: s.z,
+        size: s.hw / 0.75,
+        arms: s.arms,
+      })),
+      crystals: this.crystals.map((c) => ({ x: c.x, z: c.z, height: c.height, tint: c.tint })),
+    };
+  }
+
+  _applyLayout(layout) {
+    for (const c of layout.covers ?? []) this.addCover(c.x, c.z, c.w, c.d, c.shape ?? "block");
+    for (const s of layout.splitters ?? []) this.addSplitter(s.x, s.z, s.size ?? 1.4, s.arms ?? 3);
+    for (const c of layout.crystals ?? []) this.addCrystalTower(c.x, c.z, c.height ?? 2.2, c.tint ?? 0x88ddff);
   }
 
   /** World-space (x, z) polygon matching the visible floor edge. Single source of truth. */
@@ -348,14 +382,107 @@ export class Arena {
     }
   }
 
-  addCover(x, z, w, d) {
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(w, 1.2, d),
-      new THREE.MeshBasicMaterial({ color: COLORS.cover })
-    );
-    mesh.position.set(x, 0.6, z);
-    this.group.add(mesh);
-    this.covers.push({ x, z, hw: w / 2, hd: d / 2, mesh });
+  addCover(x, z, w, d, shape = null) {
+    const shapes = ["block", "pillar", "prism", "slab", "diamond"];
+    const pick = shape ?? shapes[Math.floor(Math.random() * shapes.length)];
+    const group = new THREE.Group();
+    const outerColor = COLORS.cover;
+    const coreColor = 0x44ffee;
+    const phase = Math.random() * Math.PI * 2;
+    let coreMesh;
+    let height = 1.15;
+    let cover;
+
+    switch (pick) {
+      case "pillar": {
+        const r = Math.min(w, d) * 0.42;
+        height = 1.35;
+        const outer = new THREE.Mesh(
+          new THREE.CylinderGeometry(r, r * 1.08, height, 10),
+          new THREE.MeshBasicMaterial({ color: outerColor, transparent: true, opacity: 0.9 })
+        );
+        outer.position.y = height / 2;
+        coreMesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(r * 0.38, r * 0.38, height * 0.55, 8),
+          new THREE.MeshBasicMaterial({ color: coreColor, transparent: true, opacity: 0.82 })
+        );
+        coreMesh.position.y = height / 2;
+        group.add(outer, coreMesh);
+        cover = { x, z, shape: pick, radius: r, hw: r, hd: r, height, mesh: group, coreMesh, phase };
+        break;
+      }
+      case "prism": {
+        const r = Math.min(w, d) * 0.45;
+        height = 1.25;
+        const outer = new THREE.Mesh(
+          new THREE.CylinderGeometry(r, r * 0.72, height, 6),
+          new THREE.MeshBasicMaterial({ color: 0x7744cc, transparent: true, opacity: 0.88 })
+        );
+        outer.position.y = height / 2;
+        coreMesh = new THREE.Mesh(
+          new THREE.OctahedronGeometry(r * 0.32, 0),
+          new THREE.MeshBasicMaterial({ color: 0xaa66ff, transparent: true, opacity: 0.85 })
+        );
+        coreMesh.position.y = height * 0.52;
+        group.add(outer, coreMesh);
+        cover = { x, z, shape: pick, radius: r, hw: r, hd: r, height, mesh: group, coreMesh, phase };
+        break;
+      }
+      case "slab": {
+        const sw = w * 1.15;
+        const sd = d * 0.72;
+        height = 0.62;
+        const outer = new THREE.Mesh(
+          new THREE.BoxGeometry(sw, height, sd),
+          new THREE.MeshBasicMaterial({ color: 0x5533aa, transparent: true, opacity: 0.9 })
+        );
+        outer.position.y = height / 2;
+        coreMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(sw * 0.38, height * 0.65, sd * 0.38),
+          new THREE.MeshBasicMaterial({ color: coreColor, transparent: true, opacity: 0.8 })
+        );
+        coreMesh.position.y = height / 2;
+        group.add(outer, coreMesh);
+        cover = { x, z, shape: pick, hw: sw / 2, hd: sd / 2, height, mesh: group, coreMesh, phase };
+        break;
+      }
+      case "diamond": {
+        const r = Math.min(w, d) * 0.48;
+        height = 1.3;
+        const outer = new THREE.Mesh(
+          new THREE.OctahedronGeometry(r, 0),
+          new THREE.MeshBasicMaterial({ color: 0x6622aa, transparent: true, opacity: 0.88 })
+        );
+        outer.position.y = height * 0.48;
+        outer.scale.set(1, 1.35, 1);
+        coreMesh = new THREE.Mesh(
+          new THREE.OctahedronGeometry(r * 0.34, 0),
+          new THREE.MeshBasicMaterial({ color: 0xff88dd, transparent: true, opacity: 0.9 })
+        );
+        coreMesh.position.y = height * 0.48;
+        group.add(outer, coreMesh);
+        cover = { x, z, shape: pick, radius: r * 0.82, hw: r * 0.82, hd: r * 0.82, height, mesh: group, coreMesh, phase };
+        break;
+      }
+      default: {
+        const outer = new THREE.Mesh(
+          new THREE.BoxGeometry(w, height, d),
+          new THREE.MeshBasicMaterial({ color: outerColor, transparent: true, opacity: 0.9 })
+        );
+        outer.position.y = height / 2;
+        coreMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(w * 0.38, height * 0.55, d * 0.38),
+          new THREE.MeshBasicMaterial({ color: coreColor, transparent: true, opacity: 0.82 })
+        );
+        coreMesh.position.y = height / 2;
+        group.add(outer, coreMesh);
+        cover = { x, z, shape: "block", hw: w / 2, hd: d / 2, height, mesh: group, coreMesh, phase };
+      }
+    }
+
+    group.position.set(x, 0, z);
+    this.group.add(group);
+    this.covers.push(cover);
   }
 
   addSplitter(x, z, size = 1.4, arms = 3) {
@@ -370,6 +497,104 @@ export class Arena {
     group.position.set(x, 0.35, z);
     this.group.add(group);
     this.splitters.push({ x, z, hw: size * 0.75, hd: size * 0.75, arms, mesh: group });
+  }
+
+  _buildCovers() {
+    const count = 2 + Math.floor(Math.random() * 2);
+    const anchors = [
+      { x: -0.42, z: -0.05, w: 2.4, d: 1.5 },
+      { x: 0.38, z: -0.22, w: 1.8, d: 2.2 },
+      { x: -0.12, z: 0.18, w: 2.1, d: 1.6 },
+      { x: 0.22, z: 0.08, w: 1.6, d: 1.9 },
+    ].sort(() => Math.random() - 0.5);
+
+    for (let i = 0; i < count; i++) {
+      const a = anchors[i];
+      const x = a.x * this.halfX * 1.35;
+      const z = a.z * this.halfZ * 1.35;
+      if (!this.isInside(x, z, 1.4)) continue;
+      if (this._isNearSpawn(x, z, SPAWN_CLEAR_RADIUS + 2)) continue;
+      if (this._overlapsProp(x, z, a.w, a.d)) continue;
+      this.addCover(x, z, a.w, a.d);
+    }
+  }
+
+  _overlapsProp(x, z, w, d) {
+    const hw = w / 2;
+    const hd = d / 2;
+    for (const c of this.covers) {
+      if (Math.abs(x - c.x) < hw + c.hw + 0.8 && Math.abs(z - c.z) < hd + c.hd + 0.8) return true;
+    }
+    for (const s of this.splitters) {
+      if (Math.hypot(x - s.x, z - s.z) < hw + s.hw + 0.9) return true;
+    }
+    return false;
+  }
+
+  addCrystalTower(x, z, height = 2.2, tint = 0x88ddff) {
+    const group = new THREE.Group();
+    const segments = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < segments; i++) {
+      const scale = 1 - i * 0.22;
+      const crystal = new THREE.Mesh(
+        new THREE.ConeGeometry(0.55 * scale, height * 0.45 * scale, 4),
+        new THREE.MeshBasicMaterial({
+          color: tint,
+          transparent: true,
+          opacity: 0.55 + i * 0.08,
+        })
+      );
+      crystal.position.y = 0.25 + i * height * 0.38;
+      crystal.rotation.y = (Math.PI / 4) * i;
+      group.add(crystal);
+      const cap = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.22 * scale, 0),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 })
+      );
+      cap.position.y = crystal.position.y + height * 0.18 * scale;
+      group.add(cap);
+    }
+    group.position.set(x, 0, z);
+    this.group.add(group);
+    this.crystals.push({ x, z, height, tint, mesh: group, phase: Math.random() * Math.PI * 2 });
+  }
+
+  _buildCrystalTowers() {
+    const count = 2 + Math.floor(Math.random() * 2);
+    const tints = [0x66ccff, 0xaa88ff, 0xff88dd, 0x44ffcc];
+    const anchors = [
+      { x: -0.55, z: -0.35 },
+      { x: 0.58, z: -0.28 },
+      { x: -0.48, z: 0.32 },
+      { x: 0.5, z: 0.25 },
+    ].sort(() => Math.random() - 0.5);
+
+    for (let i = 0; i < count; i++) {
+      const a = anchors[i];
+      const x = a.x * this.halfX * 1.15;
+      const z = a.z * this.halfZ * 1.15;
+      if (!this.isInside(x, z, 1.2)) continue;
+      if (this._isNearSpawn(x, z, SPAWN_CLEAR_RADIUS + 1.5)) continue;
+      if (this._overlapsProp(x, z, 1.4, 1.4)) continue;
+      this.addCrystalTower(x, z, 1.8 + Math.random() * 1.4, tints[i % tints.length]);
+    }
+  }
+
+  updateDecorations(dt) {
+    this.decorTime += dt;
+    for (const c of this.crystals) {
+      const pulse = 1 + Math.sin(this.decorTime * 1.4 + c.phase) * 0.04;
+      c.mesh.scale.set(pulse, pulse, pulse);
+      c.mesh.rotation.y += dt * 0.15;
+    }
+    for (const c of this.covers) {
+      if (!c.coreMesh?.material) continue;
+      const pulse = 0.62 + Math.sin(this.decorTime * 2.4 + c.phase) * 0.28;
+      c.coreMesh.material.opacity = pulse;
+      const scale = 0.92 + Math.sin(this.decorTime * 3.1 + c.phase) * 0.1;
+      c.coreMesh.scale.set(scale, scale, scale);
+      c.mesh.rotation.y += dt * 0.08;
+    }
   }
 
   _buildSplitters() {
@@ -443,13 +668,36 @@ export class Arena {
 
   blocksSegment(x0, z0, x1, z1) {
     for (const c of this.covers) {
-      if (this.segmentHitsAABB(x0, z0, x1, z1, c)) return true;
+      if (this.coverHitsSegment(x0, z0, x1, z1, c)) return true;
     }
     return false;
   }
 
+  coverHitsSegment(x0, z0, x1, z1, c) {
+    if (c.radius != null && (c.shape === "pillar" || c.shape === "prism" || c.shape === "diamond")) {
+      return this.segmentHitsCircle(x0, z0, x1, z1, c.x, c.z, c.radius);
+    }
+    return this.segmentHitsAABB(x0, z0, x1, z1, c);
+  }
+
+  segmentHitsCircle(x0, z0, x1, z1, cx, cz, r) {
+    const dx = x1 - x0;
+    const dz = z1 - z0;
+    const lenSq = dx * dx + dz * dz;
+    if (lenSq < 1e-8) return Math.hypot(x0 - cx, z0 - cz) <= r;
+    let t = ((cx - x0) * dx + (cz - z0) * dz) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const px = x0 + dx * t;
+    const pz = z0 + dz * t;
+    return Math.hypot(px - cx, pz - cz) <= r;
+  }
+
   blocksPoint(x, z, radius = 0) {
     for (const c of this.covers) {
+      if (c.radius != null && (c.shape === "pillar" || c.shape === "prism" || c.shape === "diamond")) {
+        if (Math.hypot(x - c.x, z - c.z) < c.radius + radius) return true;
+        continue;
+      }
       const dx = Math.max(Math.abs(x - c.x) - c.hw, 0);
       const dz = Math.max(Math.abs(z - c.z) - c.hd, 0);
       if (Math.hypot(dx, dz) < radius) return true;
@@ -502,7 +750,7 @@ export class Arena {
     return { x: 0, z: -this.halfZ * 0.35 };
   }
 
-  clampPlayer(x, z, radius) {
+  clampPlayer(x, z, radius, { ignoreCovers = false } = {}) {
     let nx = x;
     let nz = z;
     const pad = radius + 0.45;
@@ -534,7 +782,7 @@ export class Arena {
       }
     }
 
-    if (this.blocksPoint(nx, nz, radius)) {
+    if (!ignoreCovers && this.blocksPoint(nx, nz, radius)) {
       nx = x;
       nz = z;
     }
@@ -605,6 +853,7 @@ export class Arena {
     while (this.group.children.length) this.group.remove(this.group.children[0]);
     this.covers = [];
     this.splitters = [];
+    this.crystals = [];
   }
 
   pickRandomSize() {

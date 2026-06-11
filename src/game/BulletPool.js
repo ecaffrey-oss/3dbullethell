@@ -6,10 +6,11 @@ import {
   PLAYER_BULLET_SPEED,
   COLORS,
   ARENA_SIZE,
+  MAX_BULLETS,
+  MAX_ENEMY_BULLETS,
+  MAX_PLAYER_BULLETS,
 } from "./constants.js";
 import { beamMaxLength } from "./BeamUtils.js";
-
-const MAX_BULLETS = 900;
 
 export class BulletPool {
   constructor(scene) {
@@ -18,8 +19,7 @@ export class BulletPool {
   }
 
   spawnPlayerBullet(x, z, dirX, dirZ, speed = PLAYER_BULLET_SPEED, damage = 1, opts = {}) {
-    this.compact();
-    if (this.bullets.length >= MAX_BULLETS) return false;
+    if (!this._ensureSlot(true)) return false;
 
     const radius = opts.radius ?? (opts.laser ? 0.08 : opts.boomerang ? 0.22 : PLAYER_BULLET_RADIUS);
     const color = opts.laser ? 0x00ffff : opts.boomerang ? 0xffaa00 : opts.color ?? COLORS.playerBullet;
@@ -66,8 +66,7 @@ export class BulletPool {
   }
 
   spawnBeamLine(x, z, dirX, dirZ, arena, damage = 1, opts = {}) {
-    this.compact();
-    if (this.bullets.length >= MAX_BULLETS) return false;
+    if (!this._ensureSlot(true)) return false;
 
     const len = Math.hypot(dirX, dirZ) || 1;
     const dx = dirX / len;
@@ -118,8 +117,7 @@ export class BulletPool {
   }
 
   spawnEnemyBullet(x, z, dirX, dirZ, speed = ENEMY_BULLET_SPEED, opts = {}) {
-    this.compact();
-    if (this.bullets.length >= MAX_BULLETS) return false;
+    if (!this._ensureSlot(false)) return false;
 
     const radius = opts.radius ?? ENEMY_BULLET_RADIUS;
     const geo = new THREE.SphereGeometry(radius, 5, 5);
@@ -157,33 +155,63 @@ export class BulletPool {
 
   spawnRadialBurst(x, z, count, speed = ENEMY_BULLET_SPEED, opts = {}) {
     for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2;
-      this.spawnEnemyBullet(x, z, Math.cos(angle), Math.sin(angle), speed, opts);
+      if (this._enemyCount() >= MAX_ENEMY_BULLETS) this._evictOldestEnemy();
+      if (!this.spawnEnemyBullet(x, z, Math.cos((i / count) * Math.PI * 2), Math.sin((i / count) * Math.PI * 2), speed, opts)) {
+        break;
+      }
     }
   }
 
-  _bounceOffWalls(b, half) {
-    let bounced = false;
-    if (b.x > half) {
-      b.x = half;
-      b.vx = -Math.abs(b.vx);
-      bounced = true;
-    } else if (b.x < -half) {
-      b.x = -half;
-      b.vx = Math.abs(b.vx);
-      bounced = true;
+  _enemyCount() {
+    let n = 0;
+    for (const b of this.bullets) if (b.alive && !b.friendly) n++;
+    return n;
+  }
+
+  _playerCount() {
+    let n = 0;
+    for (const b of this.bullets) if (b.alive && b.friendly) n++;
+    return n;
+  }
+
+  _evictOldestEnemy() {
+    for (const b of this.bullets) {
+      if (b.alive && !b.friendly) {
+        this.remove(b);
+        return true;
+      }
     }
-    if (b.z > half) {
-      b.z = half;
-      b.vz = -Math.abs(b.vz);
-      bounced = true;
-    } else if (b.z < -half) {
-      b.z = -half;
-      b.vz = Math.abs(b.vz);
-      bounced = true;
+    return false;
+  }
+
+  _evictOldestPlayer() {
+    for (const b of this.bullets) {
+      if (b.alive && b.friendly) {
+        this.remove(b);
+        return true;
+      }
     }
-    if (bounced) b.bouncesLeft--;
-    return bounced;
+    return false;
+  }
+
+  /** Make room for a new bullet, preferring to drop enemy projectiles first. */
+  _ensureSlot(friendly) {
+    this.compact();
+    if (this.bullets.length < MAX_BULLETS) {
+      if (friendly && this._playerCount() >= MAX_PLAYER_BULLETS) return this._evictOldestPlayer();
+      if (!friendly && this._enemyCount() >= MAX_ENEMY_BULLETS) return this._evictOldestEnemy();
+      return true;
+    }
+
+    if (!friendly) {
+      if (this._evictOldestEnemy()) return true;
+      if (this._evictOldestPlayer()) return true;
+      return false;
+    }
+
+    if (this._evictOldestEnemy()) return true;
+    if (this._evictOldestPlayer()) return true;
+    return false;
   }
 
   update(dt, player, enemies, arena = null, bulletPool = null) {
