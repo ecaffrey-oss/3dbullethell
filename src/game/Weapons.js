@@ -13,6 +13,7 @@ export function isWeaponUnlocked(weapon, meta) {
   if (weapon.unlock === "unlockable") {
     return isUnlockGranted(meta, getUnlockable(weapon.unlockId));
   }
+  if (weapon.unlock === "skill") return meta.hasUnlock(weapon.id);
   return false;
 }
 
@@ -29,12 +30,34 @@ export function getWeaponUnlockLabel(weapon) {
   if (weapon.unlock === "floor") return `Floor ${weapon.unlockFloor}+`;
   if (weapon.unlock === "score") return `${weapon.unlockScore} bank pts`;
   if (weapon.unlock === "unlockable") return "Achievements or challenges";
+  if (weapon.unlock === "skill") return "Skill tree license";
   return "Locked";
 }
 
 export function getWeaponDrawbacks(weaponId) {
   return WEAPONS[weaponId]?.drawbacks ?? {};
 }
+
+/** Medium-range bubble: nearby enemies cannot fire while player uses a no-shoot weapon. */
+export const NO_SHOOT_SUPPRESS_RADIUS = 6.5;
+
+export function getNoShootSuppressRadius(weapon) {
+  if (!weapon?.noShoot) return 0;
+  return weapon.shootSuppressRadius ?? weapon.weaponAura?.radius ?? NO_SHOOT_SUPPRESS_RADIUS;
+}
+
+export function isEnemyShootSuppressed(player, enemy) {
+  if (!player?.weapon?.noShoot) return false;
+  return isWithinNoShootSuppress(player, enemy.x, enemy.z);
+}
+
+export function isWithinNoShootSuppress(player, x, z) {
+  if (!player?.weapon?.noShoot) return false;
+  const r = getNoShootSuppressRadius(player.weapon);
+  return Math.hypot(x - player.x, z - player.z) <= r;
+}
+
+let helixDrillPhase = 0;
 
 export const WEAPONS = {
   pulse: {
@@ -99,8 +122,8 @@ export const WEAPONS = {
     id: "beam",
     name: "Beam",
     description: "Damage line — −15% fire rate",
-    unlock: "floor",
-    unlockFloor: 12,
+    unlock: "unlockable",
+    unlockId: "beam",
     fireRate: 0.22,
     damage: 2,
     speed: 40,
@@ -118,8 +141,8 @@ export const WEAPONS = {
     id: "rail",
     name: "Rail",
     description: "Heavy bolt — −20% fire rate",
-    unlock: "floor",
-    unlockFloor: 15,
+    unlock: "unlockable",
+    unlockId: "rail",
     fireRate: 0.32,
     damage: 4,
     speed: 36,
@@ -136,8 +159,8 @@ export const WEAPONS = {
     id: "cluster",
     name: "Cluster",
     description: "Mini explosions — −1 max HP",
-    unlock: "floor",
-    unlockFloor: 18,
+    unlock: "unlockable",
+    unlockId: "cluster",
     fireRate: 0.28,
     damage: 1,
     speed: 22,
@@ -183,8 +206,8 @@ export const WEAPONS = {
     id: "shotgun",
     name: "Shotgun",
     description: "7-pellet close burst — −10% speed",
-    unlock: "score",
-    unlockScore: 6000,
+    unlock: "unlockable",
+    unlockId: "shotgun",
     fireRate: 0.48,
     multishot: true,
     damage: 1,
@@ -206,8 +229,8 @@ export const WEAPONS = {
     id: "storm",
     name: "Storm",
     description: "Homing drizzle — −18% fire rate",
-    unlock: "score",
-    unlockScore: 12000,
+    unlock: "unlockable",
+    unlockId: "storm",
     fireRate: 0.08,
     damage: 0.6,
     speed: 24,
@@ -349,16 +372,115 @@ export const WEAPONS = {
       return fired;
     },
   },
+  ember_lance: {
+    id: "ember_lance",
+    name: "Ember Lance",
+    description: "Scorching pierce bolts — −10% speed",
+    unlock: "skill",
+    fireRate: 0.2,
+    damage: 2,
+    speed: 32,
+    drawbacks: { speedMult: 0.9 },
+    fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts) {
+      return bulletPool.spawnPlayerBullet(x, z, dirX, dirZ, speed, damage, {
+        ...opts,
+        pierce: Math.max(opts.pierce ?? 0, 2),
+        statuses: [...(opts.statuses ?? []), "burn"],
+        color: 0xff6622,
+      });
+    },
+  },
+  cryo_needle: {
+    id: "cryo_needle",
+    name: "Cryo Needle",
+    description: "Fast homing frost darts",
+    unlock: "skill",
+    fireRate: 0.09,
+    damage: 0.75,
+    speed: 34,
+    drawbacks: { speedMult: 0.94 },
+    fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts) {
+      return bulletPool.spawnPlayerBullet(x, z, dirX, dirZ, speed, damage, {
+        ...opts,
+        homing: true,
+        homingStrength: 6,
+        statuses: [...(opts.statuses ?? []), "slow"],
+        color: 0x88ddff,
+        radius: 0.07,
+      });
+    },
+  },
+  arc_splicer: {
+    id: "arc_splicer",
+    name: "Arc Splicer",
+    description: "Zapping ricochet bolts — −12% fire rate",
+    unlock: "skill",
+    fireRate: 0.18,
+    damage: 1.5,
+    speed: 30,
+    drawbacks: { fireRateMult: 0.88 },
+    fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts) {
+      return bulletPool.spawnPlayerBullet(x, z, dirX, dirZ, speed, damage, {
+        ...opts,
+        bounce: true,
+        bounces: 8,
+        color: 0x44ffcc,
+      });
+    },
+  },
+  helix_drill: {
+    id: "helix_drill",
+    name: "Helix Drill",
+    description: "Twin spiral bore — −8% speed",
+    unlock: "skill",
+    fireRate: 0.14,
+    multishot: true,
+    damage: 1,
+    speed: 28,
+    drawbacks: { speedMult: 0.92 },
+    fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts) {
+      const phase = helixDrillPhase++ % 3;
+      const base = Math.atan2(dirX, dirZ);
+      const offsets = [-0.2, 0, 0.2];
+      let fired = false;
+      for (const o of offsets) {
+        const a = base + o + phase * 0.08;
+        if (bulletPool.spawnPlayerBullet(x, z, Math.sin(a), Math.cos(a), speed, damage, { ...opts, pierce: 1, color: 0xffcc44 })) {
+          fired = true;
+        }
+      }
+      return fired;
+    },
+  },
+  gravity_well: {
+    id: "gravity_well",
+    name: "Gravity Well",
+    description: "Slow gravity orbs — −15% fire rate",
+    unlock: "skill",
+    fireRate: 0.34,
+    damage: 2,
+    speed: 16,
+    drawbacks: { fireRateMult: 0.85 },
+    fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts) {
+      return bulletPool.spawnPlayerBullet(x, z, dirX, dirZ, speed * 0.75, damage, {
+        ...opts,
+        aoe: Math.max(opts.aoe ?? 0, 2.2),
+        radius: 0.18,
+        color: 0x9966ff,
+      });
+    },
+  },
   bulldozer: {
     id: "bulldozer",
     name: "Bulldozer",
-    description: "Ram enemies — no shooting",
+    description: "Ram enemies — no shooting · nearby foes can't fire",
     unlock: "floor",
     unlockFloor: 10,
     fireRate: 999,
     damage: 0,
     speed: 0,
     noShoot: true,
+    shootSuppressRadius: 6.5,
     ramDamage: 3,
     ramCooldown: 0.35,
     drawbacks: { speedMult: 0.95 },
@@ -369,13 +491,14 @@ export const WEAPONS = {
   sunspot: {
     id: "sunspot",
     name: "Sunspot",
-    description: "Giant burn aura — cannot shoot",
+    description: "Giant burn aura — cannot shoot · body contact harmless",
     unlock: "floor",
     unlockFloor: 20,
     fireRate: 999,
     damage: 0,
     speed: 0,
     noShoot: true,
+    shootSuppressRadius: 5.5,
     weaponAura: { radius: 5.5, damage: 1.2 },
     drawbacks: { speedMult: 0.85 },
     fire() {

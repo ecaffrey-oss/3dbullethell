@@ -29,7 +29,7 @@ export class WeaponTabUI {
 
     const hint = document.createElement("p");
     hint.className = "bank-score";
-    hint.textContent = "Unlock via best floor depth or bank score · Shift+1–9 in run";
+    hint.textContent = "Unlock via skill tree licenses, achievements, or floor depth · Shift+1–9 in run";
     this.container.appendChild(hint);
 
     const grid = document.createElement("div");

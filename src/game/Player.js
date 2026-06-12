@@ -408,7 +408,7 @@ export class Player {
       this.runState.bulletMods.add("pierce");
       this.runState.pierceCount = b.startPierce;
     }
-    if (b.startHoming) this.runState.bulletMods.add("homing");
+    if (b.startSlayerDamage) this.runState.damageBonus += b.startSlayerDamage;
     if (b.startBounce) this.runState.bounceShots = true;
     if (b.startAoe) this.runState.bulletMods.add("aoe");
     this.applyWeaponPassive();

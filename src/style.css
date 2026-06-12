@@ -786,18 +786,30 @@ body::before {
 }
 
 .skill-tree-long {
+  position: relative;
   width: 500px;
+  margin: 0 auto 12px;
 }
 
-.skill-tree-long .skill-tree-lines {
-  height: 504px;
+.skill-tree-lines-long,
+.skill-tree-long .skill-tree-lines-long {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .skill-tree-nodes-long {
-  grid-template-columns: repeat(5, 100px);
-  grid-template-rows: repeat(7, 72px);
-  min-height: 504px;
-  justify-content: center;
+  position: relative;
+  min-height: 936px;
+}
+
+.skill-tree-nodes-long .skill-node {
+  position: absolute;
+  min-height: unset;
+  padding: 6px 4px;
+  font-size: 9px;
 }
 
 .skill-node.exclusive {
@@ -977,10 +989,10 @@ body::before {
 }
 
 .route-tree-scroll {
-  max-height: min(52vh, 420px);
+  max-height: min(58vh, 480px);
   overflow: auto;
   margin: 10px 0 14px;
-  padding: 8px;
+  padding: 12px;
   border-radius: 8px;
   background: rgba(8, 4, 22, 0.85);
   border: 2px solid rgba(255, 102, 170, 0.22);
@@ -997,20 +1009,93 @@ body::before {
   width: 100%;
   height: 100%;
   pointer-events: none;
+  z-index: 1;
+}
+
+.route-tree-decor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.route-decor {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0.55;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--decor-tint) 45%, transparent));
+}
+
+.route-decor-crystal {
+  clip-path: polygon(50% 0%, 92% 38%, 72% 100%, 28% 100%, 8% 38%);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--decor-tint) 85%, white),
+    color-mix(in srgb, var(--decor-tint) 35%, #120820)
+  );
+  border: 1px solid color-mix(in srgb, var(--decor-tint) 70%, transparent);
+}
+
+.route-decor-block {
+  border-radius: 4px;
+  background: linear-gradient(145deg, #331155, #110822);
+  border: 2px solid color-mix(in srgb, var(--decor-tint) 55%, #442266);
+  box-shadow: inset 0 0 8px color-mix(in srgb, var(--decor-tint) 30%, transparent);
+}
+
+.route-decor-splitter {
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  background: radial-gradient(
+    circle at 50% 45%,
+    color-mix(in srgb, var(--decor-tint) 80%, white),
+    #220a33 70%
+  );
+  border: 1px solid color-mix(in srgb, var(--decor-tint) 65%, transparent);
+}
+
+.route-decor-pillar {
+  border-radius: 3px 3px 6px 6px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--decor-tint) 70%, #553388),
+    #180828 85%
+  );
+  box-shadow:
+    inset 2px 0 4px rgba(255, 255, 255, 0.08),
+    inset -2px 0 4px rgba(0, 0, 0, 0.35);
+}
+
+.route-tree-line {
+  stroke-width: 2.5;
 }
 
 .route-tree-nodes {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 4px;
-  padding: 8px 12px;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
 }
 
 .route-node {
-  min-height: 52px;
-  padding: 6px 4px !important;
+  position: absolute;
+  min-height: unset;
+  padding: 8px 6px !important;
   font-size: 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 10px;
+  border: 1px solid rgba(100, 150, 255, 0.35);
+  background: rgba(18, 22, 40, 0.95);
+}
+
+.route-node-anchor {
+  border-color: rgba(0, 255, 204, 0.55);
+  background: rgba(12, 32, 36, 0.95);
+  box-shadow: 0 0 12px rgba(0, 255, 204, 0.2);
+  pointer-events: none;
 }
 
 .route-node-icon {
@@ -1040,12 +1125,36 @@ body::before {
 }
 
 .route-node-preview {
-  opacity: 0.55;
+  opacity: 0.62;
   cursor: default;
 }
 
 .route-node-preview .skill-desc {
   color: #8899bb;
+}
+
+.route-node-boss {
+  border-color: rgba(255, 80, 120, 0.85) !important;
+  box-shadow: 0 0 14px rgba(255, 60, 100, 0.35);
+}
+
+.route-node-portal {
+  border-color: rgba(180, 90, 255, 0.9) !important;
+  box-shadow: 0 0 16px rgba(140, 60, 255, 0.45);
+  background: rgba(28, 10, 48, 0.96);
+}
+
+.route-node-portal .skill-desc {
+  color: #d8a8ff;
+}
+
+.route-node-unaffordable {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.route-node-unaffordable .skill-desc {
+  color: #aa7788;
 }
 
 .timing-bar-track {
@@ -1180,6 +1289,40 @@ body::before {
 .skill-node.preview .skill-desc,
 .skill-node.preview .skill-name {
   opacity: 0.7;
+}
+
+.skill-node.branch-locked {
+  border-color: rgba(120, 90, 180, 0.35);
+}
+
+.bonus-path-picker {
+  margin: 14px 0 6px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 209, 102, 0.45);
+  background: rgba(24, 12, 40, 0.95);
+}
+
+.bonus-path-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #ffd166;
+  line-height: 1.5;
+}
+
+.bonus-path-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.bonus-path-card {
+  min-height: 72px;
+}
+
+.skill-node.path-unlock {
+  border-color: rgba(255, 209, 102, 0.75);
+  box-shadow: 0 0 12px rgba(255, 180, 60, 0.25);
 }
 
 .skill-node.maxed {
@@ -1454,6 +1597,55 @@ body::before {
   height: 6px;
   accent-color: #00ffcc;
   cursor: pointer;
+}
+
+.death-effect-settings {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 102, 204, 0.25);
+}
+
+.death-effect-heading {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.death-effect-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 148px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.death-effect-option {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: start;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.death-effect-option input {
+  margin-top: 2px;
+  accent-color: #ff66cc;
+  cursor: pointer;
+}
+
+.death-effect-label {
+  font-size: 8px;
+  color: #ffe6ff;
+  letter-spacing: 0.5px;
+}
+
+.death-effect-hint {
+  grid-column: 2;
+  font-size: 7px;
+  color: #8899bb;
+  line-height: 1.35;
 }
 
 .save-slots-heading {

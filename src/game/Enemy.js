@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { COLORS, ENEMY_BULLET_SPEED } from "./constants.js";
 import { applyStatus, updateStatuses, getStatusColor, STATUS_TYPES } from "./StatusEffects.js";
+import { isEnemyShootSuppressed } from "./Weapons.js";
 
 export const CHAIR_SPAWN_CHANCE = 0.0005;
 export const SPECIAL_VARIANT_CHANCE = 0.05;
@@ -305,6 +306,7 @@ export class Enemy {
   }
 
   shoot(player, bulletPool) {
+    if (isEnemyShootSuppressed(player, this)) return;
     const pattern = this.attackToggle
       ? (this.config.secondaryPattern ?? this.config.pattern)
       : this.config.pattern;

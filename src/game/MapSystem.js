@@ -1,5 +1,7 @@
 import { PATH_TYPES } from "./PathUI.js";
 
+const LANE_COUNT = 3;
+
 const ROOM_POOL = [
   PATH_TYPES.COMBAT,
   PATH_TYPES.COMBAT,
@@ -13,9 +15,6 @@ const ROOM_POOL = [
   PATH_TYPES.WAVES,
 ];
 
-/** How many floors ahead to pre-generate and display on the route tree. */
-export const ROUTE_TREE_HORIZON = 12;
-
 export const ROOM_META = {
   [PATH_TYPES.COMBAT]: { name: "Patrol", icon: "⚔", desc: "Standard fight" },
   [PATH_TYPES.REST]: { name: "Rest", icon: "🛏", desc: "Timing game → heal" },
@@ -25,256 +24,357 @@ export const ROOM_META = {
   [PATH_TYPES.HARD]: { name: "Hard", icon: "🔥", desc: "Tough room · 2× score" },
   [PATH_TYPES.MINIGAME]: { name: "Bonus", icon: "🎯", desc: "Minigame → 70% 500pts · 20% heal · 10% upgrade" },
   [PATH_TYPES.CHANCE]: { name: "Oracle", icon: "🎲", desc: "50% hurt · 40% heal · 10% item" },
-  [PATH_TYPES.WAVES]: { name: "Horde", icon: "🌊", desc: "Huge arena · up to 5 enemy waves" },
+  [PATH_TYPES.WAVES]: { name: "Horde", icon: "🌊", desc: "Huge arena · waves · score + relic reward" },
   [PATH_TYPES.UPGRADE]: { name: "Relic Vault", icon: "✦", desc: "Rare — pick 1 of 2 upgrades" },
+  [PATH_TYPES.BOSS_PORTAL]: {
+    name: "Boss Portal",
+    icon: "🌀",
+    desc: "Warp to boss · costs 500 run score",
+  },
 };
 
-let _nid = 0;
-
-function node(type, depth, parent = null) {
-  return { id: _nid++, type, depth, visited: false, children: [], parent };
-}
-
-function randomRoom(depth) {
-  if (depth <= 1) return PATH_TYPES.COMBAT;
-  if (Math.random() < 0.01) return PATH_TYPES.UPGRADE;
-  return ROOM_POOL[Math.floor(Math.random() * ROOM_POOL.length)];
-}
-
-function maxNodeId(node) {
-  let max = node.id;
-  for (const c of node.children) {
-    max = Math.max(max, maxNodeId(c));
+export class SeededRNG {
+  constructor(seed) {
+    this.state = (seed >>> 0) || 1;
   }
-  return max;
+
+  next() {
+    this.state = (this.state * 1664525 + 1013904223) >>> 0;
+    return this.state / 0xffffffff;
+  }
+
+  int(min, max) {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+
+  pick(arr) {
+    return arr[this.int(0, arr.length - 1)];
+  }
+}
+
+function mixSeed(a, b) {
+  return ((a ^ Math.imul(b >>> 0, 2654435761)) >>> 0) || 1;
+}
+
+function pickRoomType(rng, layer) {
+  if (layer === 0) return PATH_TYPES.COMBAT;
+  if (rng.next() < 0.01) return PATH_TYPES.UPGRADE;
+  return rng.pick(ROOM_POOL);
+}
+
+/** Layers 0–2 use straight lanes only (no crossing paths from start). */
+const NO_CROSS_LAYERS = 3;
+/** Chance a 3-way fork shows only two pickable rooms. */
+const TWO_CHOICE_RATE = 0.35;
+
+function hashChoice(seed, salt) {
+  let h = (seed ^ salt) >>> 0;
+  for (let i = 0; i < 3; i++) h = Math.imul(h ^ (h >>> 16), 2246822519) >>> 0;
+  return h;
+}
+
+function choiceSalt(id = "start") {
+  let s = 17;
+  for (let i = 0; i < id.length; i++) s = Math.imul(s + id.charCodeAt(i), 2654435761) >>> 0;
+  return s;
+}
+
+function wireLayerLinks(nodes, layer, stepsBeforeBoss, bossId, rng) {
+  if (layer >= stepsBeforeBoss - 1) {
+    for (let col = 0; col < LANE_COUNT; col++) {
+      const node = nodes.get(`${layer}-${col}`);
+      if (node) node.links = [bossId];
+    }
+    return;
+  }
+
+  const straightOnly = layer < NO_CROSS_LAYERS;
+
+  for (let col = 0; col < LANE_COUNT; col++) {
+    const node = nodes.get(`${layer}-${col}`);
+    if (!node) continue;
+    const next = [`${layer + 1}-${col}`];
+    if (!straightOnly) {
+      if (col > 0 && rng.next() < 0.62) next.push(`${layer + 1}-${col - 1}`);
+      if (col < LANE_COUNT - 1 && rng.next() < 0.62) next.push(`${layer + 1}-${col + 1}`);
+    }
+    node.links = [...new Set(next)];
+  }
+
+  for (let col = 0; col < LANE_COUNT; col++) {
+    const targetId = `${layer + 1}-${col}`;
+    const hasIncoming = [...nodes.values()].some(
+      (n) => n.layer === layer && n.links.includes(targetId)
+    );
+    if (!hasIncoming) {
+      const from = nodes.get(`${layer}-${col}`);
+      if (from) {
+        from.links.push(targetId);
+        from.links = [...new Set(from.links)];
+      }
+    }
+  }
+}
+
+function assignBossPortal(rng, nodes, stepsBeforeBoss) {
+  if (stepsBeforeBoss < 3) return;
+  const maxLayer = stepsBeforeBoss - 2;
+  const layer = rng.int(1, maxLayer);
+  const col = rng.int(0, LANE_COUNT - 1);
+  const node = nodes.get(`${layer}-${col}`);
+  if (node) node.type = PATH_TYPES.BOSS_PORTAL;
+}
+
+function generateFloorMap(runSeed, floorIndex) {
+  const floorSeed = mixSeed(runSeed, floorIndex + 1);
+  const rng = new SeededRNG(floorSeed);
+  const stepsBeforeBoss = 5 + rng.int(0, 3);
+  const bossId = "boss";
+  const nodes = new Map();
+
+  nodes.set(bossId, {
+    id: bossId,
+    layer: stepsBeforeBoss,
+    col: 1,
+    type: PATH_TYPES.BOSS,
+    links: [],
+  });
+
+  for (let layer = 0; layer < stepsBeforeBoss; layer++) {
+    for (let col = 0; col < LANE_COUNT; col++) {
+      const id = `${layer}-${col}`;
+      nodes.set(id, {
+        id,
+        layer,
+        col,
+        type: pickRoomType(rng, layer),
+        links: [],
+      });
+    }
+  }
+
+  assignBossPortal(rng, nodes, stepsBeforeBoss);
+
+  for (let layer = 0; layer < stepsBeforeBoss; layer++) {
+    wireLayerLinks(nodes, layer, stepsBeforeBoss, bossId, rng);
+  }
+
+  return { floorSeed, stepsBeforeBoss, bossId, nodes };
 }
 
 export class MapSystem {
   constructor() {
-    this.root = null;
-    this.current = null;
+    this.runSeed = 1;
+    this.floorIndex = 0;
+    this.floorSeed = 1;
+    this.stepsBeforeBoss = 6;
+    this.bossId = "boss";
+    this.nodes = new Map();
+    this.currentNodeId = null;
     this.reset();
   }
 
-  reset() {
-    _nid = 0;
-    this.root = node(PATH_TYPES.COMBAT, 0);
-    this.root.visited = true;
-    this.current = this.root;
-    this._ensureChildren(this.root);
-    this._ensureHorizon();
+  reset(runSeed) {
+    this.runSeed = runSeed ?? (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
+    this.floorIndex = 0;
+    this.currentNodeId = null;
+    this._generateCurrentFloor();
   }
 
-  _ensureChildren(n) {
-    while (n.children.length < 2) {
-      n.children.push(node(randomRoom(n.depth + 1), n.depth + 1, n));
-    }
+  startNewFloor(floorIndex) {
+    this.floorIndex = floorIndex;
+    this.currentNodeId = null;
+    this._generateCurrentFloor();
   }
 
-  _expandSubtree(n, targetDepth) {
-    if (n.depth >= targetDepth) return;
-    this._ensureChildren(n);
-    for (const c of n.children) {
-      this._expandSubtree(c, targetDepth);
-    }
+  _generateCurrentFloor() {
+    const floor = generateFloorMap(this.runSeed, this.floorIndex);
+    this.floorSeed = floor.floorSeed;
+    this.stepsBeforeBoss = floor.stepsBeforeBoss;
+    this.bossId = floor.bossId;
+    this.nodes = floor.nodes;
   }
 
-  _ensureHorizon() {
-    const target = this.current.depth + ROUTE_TREE_HORIZON;
-    let walk = this.root;
-    while (walk && walk !== this.current) {
-      this._ensureChildren(walk);
-      walk = walk.children.find((c) => c.visited) ?? null;
-    }
-    this._ensureChildren(this.current);
-    for (const c of this.current.children) {
-      this._expandSubtree(c, target);
-    }
+  _node(id) {
+    return this.nodes.get(id) ?? null;
   }
 
-  injectBoss(force) {
-    if (!force) return;
-    this._ensureChildren(this.current);
-    for (const c of this.current.children.filter((ch) => !ch.visited)) {
-      c.type = PATH_TYPES.BOSS;
-    }
+  _maybeLimitToTwoChoices(nodes, salt) {
+    if (nodes.length <= 2) return nodes;
+    if (nodes.some((n) => n.id === this.bossId || n.type === PATH_TYPES.BOSS)) return nodes;
+
+    const h = hashChoice(this.floorSeed, salt);
+    if (h % 100 >= Math.floor(TWO_CHOICE_RATE * 100)) return nodes;
+
+    const drop = (h >>> 8) % nodes.length;
+    return nodes.filter((_, i) => i !== drop);
   }
 
-  _visitedPath() {
-    const path = [];
-    let n = this.root;
-    while (n) {
-      path.push(n);
-      if (n === this.current) break;
-      n = n.children.find((c) => c.visited) ?? null;
+  _validNextNodes() {
+    const current = this.currentNodeId ? this._node(this.currentNodeId) : null;
+    const nextLayer = (current?.layer ?? -1) + 1;
+    const salt = choiceSalt(current?.id ?? "start");
+
+    if (nextLayer >= this.stepsBeforeBoss) {
+      const boss = this._node(this.bossId);
+      return boss ? [boss] : [];
     }
-    return path;
+
+    const opts = Array.from({ length: LANE_COUNT }, (_, col) => this._node(`${nextLayer}-${col}`)).filter(Boolean);
+    return this._maybeLimitToTwoChoices(opts, salt);
   }
 
-  _collectBranchNodes(n, maxDepth, out) {
-    if (n.depth > maxDepth) return;
-    out.add(n);
-    for (const c of n.children) {
-      this._collectBranchNodes(c, maxDepth, out);
-    }
+  _validateChoice(nodeId) {
+    return this._validNextNodes().some((n) => n.id === nodeId);
   }
 
-  _layoutNodes(rootNodes) {
-    let nextCol = 0;
-    const layouts = new Map();
-
-    const walk = (n) => {
-      if (!n.children.length) {
-        const col = nextCol++;
-        layouts.set(n.id, col);
-        return col;
-      }
-      const cols = n.children.map((c) => walk(c));
-      const col = (cols[0] + cols[cols.length - 1]) / 2;
-      layouts.set(n.id, col);
-      return col;
-    };
-
-    for (const root of rootNodes) {
-      walk(root);
-    }
-    return layouts;
+  getStepsUntilBoss() {
+    if (this.currentNodeId === null) return this.stepsBeforeBoss + 1;
+    const current = this._node(this.currentNodeId);
+    if (!current) return this.stepsBeforeBoss + 1;
+    if (current.type === PATH_TYPES.BOSS) return 0;
+    return this.stepsBeforeBoss - current.layer;
   }
 
-  _buildTreeLayout(forceBoss = false) {
-    this._ensureHorizon();
-    if (forceBoss) this.injectBoss(true);
-
-    const path = this._visitedPath();
-    const visible = new Set(path.map((n) => n.id));
-    const maxDepth = this.current.depth + ROUTE_TREE_HORIZON;
-    for (const c of this.current.children) {
-      this._collectBranchNodes(c, maxDepth, visible);
-    }
-
-    const branchRoots = this.current.children.filter((c) => visible.has(c.id));
-    const colMap = this._layoutNodes(branchRoots.length ? branchRoots : [this.current]);
-
-    for (const p of path) {
-      if (!colMap.has(p.id)) {
-        const childCols = p.children.filter((c) => colMap.has(c.id)).map((c) => colMap.get(c.id));
-        if (childCols.length) {
-          colMap.set(p.id, (Math.min(...childCols) + Math.max(...childCols)) / 2);
-        } else {
-          colMap.set(p.id, 0);
-        }
-      }
-    }
-
-    const nodes = [];
-    const edges = [];
-    const seen = new Set();
-
-    const all = [];
-    const walkAll = (n) => {
-      all.push(n);
-      for (const c of n.children) walkAll(c);
-    };
-    walkAll(this.root);
-
-    for (const n of all) {
-      if (!visible.has(n.id) || seen.has(n.id)) continue;
-      seen.add(n.id);
-      const meta = ROOM_META[n.type] ?? { name: n.type, icon: "?" };
-      nodes.push({
-        id: n.id,
-        type: n.type,
-        depth: n.depth,
-        visited: n.visited,
-        row: n.depth,
-        col: colMap.get(n.id) ?? 0,
-        icon: meta.icon,
-        name: meta.name,
-        desc: meta.desc,
-        isCurrent: n.id === this.current.id,
-        isChoice: n.parent === this.current && !n.visited,
-      });
-    }
-
-    for (const n of all) {
-      if (!visible.has(n.id)) continue;
-      for (const c of n.children) {
-        if (visible.has(c.id)) edges.push({ fromId: n.id, toId: c.id });
-      }
-    }
-
-    const minRow = Math.max(0, this.current.depth - 2);
-    const maxRow = this.current.depth + ROUTE_TREE_HORIZON;
-    const filteredNodes = nodes.filter((n) => n.row >= minRow && n.row <= maxRow);
-    const keepIds = new Set(filteredNodes.map((n) => n.id));
-    const filteredEdges = edges.filter((e) => keepIds.has(e.fromId) && keepIds.has(e.toId));
-
-    return { nodes: filteredNodes, edges: filteredEdges, minRow, maxRow };
-  }
-
-  getChoices(forceBoss = false) {
-    if (forceBoss) {
-      this.injectBoss(true);
-      this._ensureChildren(this.current);
-      const bossNode = this.current.children.find((c) => !c.visited && c.type === PATH_TYPES.BOSS);
-      if (bossNode) {
-        return [
-          {
-            nodeId: bossNode.id,
-            type: PATH_TYPES.BOSS,
-            ...ROOM_META[PATH_TYPES.BOSS],
-            preview: [],
-            bossOnly: true,
-          },
-        ];
-      }
-    }
-
-    this._ensureChildren(this.current);
-    let opts = this.current.children.filter((c) => !c.visited);
-    if (!opts.length) {
-      this.current.children = [];
-      this._ensureChildren(this.current);
-      opts = this.current.children;
-    }
-    return opts.slice(0, 2).map((c) => ({
-      nodeId: c.id,
-      type: c.type,
-      ...ROOM_META[c.type],
-      preview: this._previewChain(c, 2),
+  getChoices() {
+    const opts = this._validNextNodes();
+    const bossOnly = opts.length === 1 && opts[0]?.type === PATH_TYPES.BOSS;
+    return opts.map((node) => ({
+      nodeId: node.id,
+      type: node.type,
+      ...ROOM_META[node.type],
+      bossOnly,
     }));
   }
 
-  _previewChain(n, depth) {
-    if (depth <= 0) return [];
-    this._ensureChildren(n);
-    return n.children.slice(0, 2).map((c) => ({ type: c.type, ...ROOM_META[c.type] }));
-  }
+  _collectForwardTree() {
+    const current = this.currentNodeId ? this._node(this.currentNodeId) : null;
+    const currentLayer = current?.layer ?? -1;
+    const validNext = this._validNextNodes();
+    const validNextIds = new Set(validNext.map((n) => n.id));
 
-  advance(nodeId) {
-    this._ensureChildren(this.current);
-    const next = this.current.children.find((c) => c.id === nodeId);
-    if (!next) return null;
-    next.visited = true;
-    this.current = next;
-    this._ensureHorizon();
-    return this.current.type;
-  }
+    const visible = new Map();
+    const edges = [];
+    const seen = new Set();
 
-  getMapView(forceBoss = false) {
+    const addVisible = (id) => {
+      if (visible.has(id)) return;
+      const node = this._node(id);
+      if (!node) return;
+
+      const meta = ROOM_META[node.type] ?? { name: node.type, icon: "?" };
+      const isBoss = node.id === this.bossId || node.type === PATH_TYPES.BOSS;
+      visible.set(id, {
+        id: node.id,
+        type: node.type,
+        layer: node.layer,
+        row: node.layer,
+        col: node.col,
+        icon: meta.icon,
+        name: meta.name,
+        desc: meta.desc,
+        isChoice: validNextIds.has(node.id),
+        isBoss,
+        isPortal: node.type === PATH_TYPES.BOSS_PORTAL,
+        isCurrent: id === this.currentNodeId,
+        isPast: node.layer < currentLayer,
+      });
+    };
+
+    if (current) {
+      addVisible(current.id);
+      seen.add(current.id);
+      for (const next of validNext) {
+        edges.push({ fromId: current.id, toId: next.id });
+      }
+    }
+
+    const queue = validNext.map((n) => n.id);
+    while (queue.length) {
+      const id = queue.shift();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      addVisible(id);
+
+      const node = this._node(id);
+      if (!node) continue;
+
+      for (const nextId of node.links) {
+        edges.push({ fromId: id, toId: nextId });
+        if (!seen.has(nextId)) queue.push(nextId);
+      }
+    }
+
+    const nodes = [...visible.values()];
+
     return {
-      choices: this.getChoices(forceBoss),
-      tree: this._buildTreeLayout(forceBoss),
-      depth: this.current.depth,
-      bossOnly: forceBoss,
+      nodes,
+      edges: edges.filter((e) => visible.has(e.fromId) && visible.has(e.toId)),
+      minRow: 0,
+      maxRow: Math.max(0, ...nodes.map((n) => n.row)),
+      currentNodeId: this.currentNodeId,
     };
   }
 
-  syncIdCounter() {
-    _nid = maxNodeId(this.root) + 1;
+  advance(nodeId) {
+    if (!this._validateChoice(nodeId)) return null;
+    const node = this._node(nodeId);
+    if (!node) return null;
+    this.currentNodeId = nodeId;
+    return node.type;
   }
-}
 
-export function bumpMapIdCounter(mapSystem) {
-  if (mapSystem?.root) mapSystem.syncIdCounter();
+  jumpToBoss() {
+    this.currentNodeId = this.bossId;
+  }
+
+  getMapView() {
+    const choices = this.getChoices();
+    const bossOnly = choices.length === 1 && choices[0]?.type === PATH_TYPES.BOSS;
+    return {
+      choices,
+      tree: this._collectForwardTree(),
+      floorIndex: this.floorIndex,
+      stepsUntilBoss: this.getStepsUntilBoss(),
+      bossOnly,
+      floorSeed: this.floorSeed,
+    };
+  }
+
+  /** Restore saved floor state (used by run snapshots). */
+  loadState(data) {
+    if (!data) {
+      this.reset();
+      return;
+    }
+    this.runSeed = data.runSeed ?? this.runSeed;
+    this.floorIndex = data.floorIndex ?? 0;
+    this.floorSeed = data.floorSeed ?? 1;
+    this.stepsBeforeBoss = data.stepsBeforeBoss ?? 6;
+    this.bossId = data.bossId ?? "boss";
+    this.currentNodeId = data.currentNodeId ?? null;
+    this.nodes = new Map();
+    for (const raw of data.nodes ?? []) {
+      this.nodes.set(raw.id, { ...raw, links: [...(raw.links ?? [])] });
+    }
+    if (!this.nodes.size) this._generateCurrentFloor();
+  }
+
+  exportState() {
+    return {
+      runSeed: this.runSeed,
+      floorIndex: this.floorIndex,
+      floorSeed: this.floorSeed,
+      stepsBeforeBoss: this.stepsBeforeBoss,
+      bossId: this.bossId,
+      currentNodeId: this.currentNodeId,
+      nodes: [...this.nodes.values()].map((n) => ({
+        id: n.id,
+        layer: n.layer,
+        col: n.col,
+        type: n.type,
+        links: [...n.links],
+      })),
+    };
+  }
 }

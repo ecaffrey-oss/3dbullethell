@@ -16,8 +16,7 @@ export class RoomManager {
     this.bossIntroTimer = 0;
     this.isBossRoom = false;
     this.currentRoomType = PATH_TYPES.COMBAT;
-    this.roomsSinceBoss = 0;
-    this.nextBossIn = 5 + Math.floor(Math.random() * 6);
+    this.bossDefeatsThisRun = 0;
     this.onBossDefeated = null;
     this.onRoomCleared = null;
     this.onPathChoice = null;
@@ -26,9 +25,10 @@ export class RoomManager {
     this.onMinigameStart = null;
     this.onChanceRoomStart = null;
     this.onUpgradeRoomStart = null;
+    this.onBossPortalStart = null;
+    this.onHordeReward = null;
+    this.isOverlordFight = false;
     this.onRoomReady = null;
-    this.bossDefeatsThisRun = 0;
-    this.pendingBoss = false;
     this.hazardSystem = null;
     this.arenaHazards = null;
     this.roomScoreMultiplier = 1;
@@ -40,6 +40,8 @@ export class RoomManager {
     this.waveTotal = 0;
     this.wavesSpawned = 0;
     this.waveBreakTimer = 0;
+    this.portalToBoss = false;
+    this.waveClearBonus = 0;
   }
 
   get scaledEnemyFireMult() {
@@ -83,10 +85,7 @@ export class RoomManager {
     this.bossIntroTimer = 0;
     this.isBossRoom = false;
     this.currentRoomType = PATH_TYPES.COMBAT;
-    this.roomsSinceBoss = 0;
-    this.nextBossIn = 5 + Math.floor(Math.random() * 6);
     this.bossDefeatsThisRun = 0;
-    this.pendingBoss = false;
     this.roomScoreMultiplier = 1;
     this.restHealed = false;
     this.chanceOutcome = null;
@@ -95,6 +94,8 @@ export class RoomManager {
     this.waveTotal = 0;
     this.wavesSpawned = 0;
     this.waveBreakTimer = 0;
+    this.portalToBoss = false;
+    this.waveClearBonus = 0;
     this.arenaHazards?.clear();
     this.clearEnemies();
     this.spawnIntroRoom();
@@ -166,6 +167,16 @@ export class RoomManager {
     }
   }
 
+  _spawnOverlordMinions(_boss) {
+    const pool = getEnemyPoolForStage(this.floorsCleared);
+    const count = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < count; i++) {
+      const t = pool[Math.floor(Math.random() * pool.length)];
+      const p = this.arena.randomEnemyPoint();
+      this._spawnEnemy(t, p.x, p.z, this.healthScale * 0.85);
+    }
+  }
+
   spawnRoom(type) {
     this.clearEnemies();
     this.hazardSystem?.clear();
@@ -179,20 +190,31 @@ export class RoomManager {
     this.waveTotal = 0;
     this.wavesSpawned = 0;
     this.waveBreakTimer = 0;
+    this.waveClearBonus = 0;
 
     const shape = this.arena.pickRandomShape();
-    const size = type === PATH_TYPES.WAVES ? ROOM_SIZES.xlarge : this.arena.pickRandomSize();
+    const nextBossNum = this.bossDefeatsThisRun + 1;
+    const isOverlord = type === PATH_TYPES.BOSS && nextBossNum % 3 === 0;
+    this.isOverlordFight = isOverlord;
+
+    let size;
+    if (isOverlord) size = ROOM_SIZES.overlord;
+    else if (type === PATH_TYPES.WAVES) size = ROOM_SIZES.xlarge;
+    else size = this.arena.pickRandomSize();
     this.arena.build(size, shape);
 
     if (type === PATH_TYPES.BOSS) {
       const variant = ["stalker", "orbiter", "dasher"][Math.floor(Math.random() * 3)];
       const p = this.arena.randomEnemyPoint();
-      const boss = new Boss(this.scene, p.x, p.z, variant, this.bossDefeatsThisRun > 0);
+      const boss = new Boss(this.scene, p.x, p.z, variant, this.bossDefeatsThisRun > 0, {
+        overlord: isOverlord,
+        onSpawnMinion: isOverlord ? () => this._spawnOverlordMinions() : null,
+      });
       boss.onDeathSound = this.onEnemyDeathSound;
       boss.onDeathVisual = this.onEnemyDeathVisual;
       this.enemies.push(boss);
-      this.bossIntroTimer = 2.5;
-      this._buildArenaHazards(1.2);
+      this.bossIntroTimer = isOverlord ? 3.2 : 2.5;
+      this._buildArenaHazards(isOverlord ? 1.45 : 1.2);
     } else if (type === PATH_TYPES.MINIBOSS) {
       const pool = getEnemyPoolForStage(this.floorsCleared);
       for (let i = 0; i < 2; i++) {
@@ -258,7 +280,6 @@ export class RoomManager {
   finishUpgradeRoom() {
     this.onRoomCleared?.(this.floorsCleared + 1, 0);
     this.floorsCleared++;
-    this.roomsSinceBoss++;
     this.state = "clearing";
     this.transitionTimer = 1.4;
   }
@@ -282,7 +303,6 @@ export class RoomManager {
     this.chanceOutcome = result?.outcome ?? null;
     this.onRoomCleared?.(this.floorsCleared + 1, 0);
     this.floorsCleared++;
-    this.roomsSinceBoss++;
     this.state = "clearing";
     this.transitionTimer = 1.4;
   }
@@ -307,7 +327,6 @@ export class RoomManager {
     const scoreBonus = result?.outcome === "score" ? 500 : 0;
     this.onRoomCleared?.(this.floorsCleared + 1, scoreBonus);
     this.floorsCleared++;
-    this.roomsSinceBoss++;
     this.state = "clearing";
     this.transitionTimer = 1.4;
   }
@@ -335,10 +354,12 @@ export class RoomManager {
   }
 
   offerPaths() {
-    if (this.roomsSinceBoss >= this.nextBossIn) {
-      this.pendingBoss = true;
+    let mapView = this.map.getMapView();
+    if (!mapView.choices.length) {
+      console.warn("No map choices — resetting route position");
+      this.map.currentNodeId = null;
+      mapView = this.map.getMapView();
     }
-    const mapView = this.map.getMapView(this.pendingBoss);
     mapView.floor = this.floorsCleared + 1;
     this.onPathChoice?.(mapView, (nodeId, type) => this.pickPath(nodeId, type));
   }
@@ -349,10 +370,12 @@ export class RoomManager {
     const advanced = this.map.advance(nodeId);
     if (!advanced) {
       console.warn("Map advance failed for node", nodeId);
+      this.state = "pathSelect";
+      this.offerPaths();
+      return;
     }
 
     if (type === PATH_TYPES.BOSS) {
-      this.pendingBoss = false;
       this.spawnRoom(PATH_TYPES.BOSS);
       return;
     }
@@ -380,7 +403,23 @@ export class RoomManager {
       this.spawnUpgradeRoom();
       return;
     }
+    if (type === PATH_TYPES.BOSS_PORTAL) {
+      this.spawnBossPortalRoom();
+      return;
+    }
     this.spawnRoom(type);
+  }
+
+  spawnBossPortalRoom() {
+    this.clearEnemies();
+    this.isBossRoom = false;
+    this.currentRoomType = PATH_TYPES.BOSS_PORTAL;
+    this.roomScoreMultiplier = 1;
+    this.state = "clearing";
+    this.transitionTimer = 2.4;
+    this.portalToBoss = true;
+    this.onBossPortalStart?.();
+    this.onRoomReady?.();
   }
 
   update(dt, player, bulletPool, enemyMoveMult = 1) {
@@ -429,25 +468,34 @@ export class RoomManager {
         this.removeEnemyVisuals();
         const hadBoss = this.isBossRoom;
         const hadMiniboss = this.currentRoomType === PATH_TYPES.MINIBOSS;
+        const hadWaves = this.currentRoomType === PATH_TYPES.WAVES;
         const hardBonus = this.roomScoreMultiplier > 1 ? 600 : 0;
+        const waveBonus = hadWaves ? 350 + this.waveTotal * 120 : 0;
+        this.waveClearBonus = waveBonus;
         this.state = "clearing";
         this.transitionTimer = hadBoss ? 2.5 : 1.0;
         if (hadBoss) {
           this.bossDefeatsThisRun++;
+          this.isOverlordFight = false;
           this.floorsCleared++;
-          this.roomsSinceBoss = 0;
-          this.nextBossIn = 5 + Math.floor(Math.random() * 6);
+          this.map.startNewFloor(this.bossDefeatsThisRun);
           this.onBossDefeated?.();
         } else if (this.currentRoomType !== PATH_TYPES.REST) {
           this.floorsCleared++;
-          this.roomsSinceBoss++;
-          this.onRoomCleared?.(this.floorsCleared, hardBonus);
+          this.onRoomCleared?.(this.floorsCleared, hardBonus + waveBonus);
         }
         if (hadMiniboss) this.onMinibossDrop?.();
+        if (hadWaves) this.onHordeReward?.();
       }
     } else if (this.state === "clearing") {
       this.transitionTimer -= dt;
       if (this.transitionTimer <= 0) {
+        if (this.portalToBoss) {
+          this.portalToBoss = false;
+          this.map.jumpToBoss();
+          this.spawnRoom(PATH_TYPES.BOSS);
+          return;
+        }
         this.state = "pathSelect";
         this.offerPaths();
       }
@@ -459,6 +507,7 @@ export class RoomManager {
   }
 
   getMessage() {
+    if (this.bossIntroTimer > 0 && this.isOverlordFight) return "⚠ OVERLORD BOSS ⚠";
     if (this.bossIntroTimer > 0 && this.isBossRoom) return "⚠ BOSS APPROACHES ⚠";
     const boss = this.enemies.find((e) => e.type === "boss");
     const liveBoss = boss?.alive ? boss : null;
@@ -470,6 +519,9 @@ export class RoomManager {
     }
     if (this.state === "chance") return "Oracle shrine — fate awaits…";
     if (this.state === "upgrade") return "Relic vault — choose your blessing";
+    if (this.currentRoomType === PATH_TYPES.BOSS_PORTAL && this.state === "clearing") {
+      return "Boss portal opening…";
+    }
     if (this.currentRoomType === PATH_TYPES.WAVES && this.state === "fighting") {
       if (this.waveBreakTimer > 0) {
         return `Wave ${Math.min(this.wavesSpawned + 1, this.waveTotal)} incoming…`;
@@ -495,7 +547,9 @@ export class RoomManager {
       }
       if (this.currentRoomType === PATH_TYPES.MINIBOSS) return "Miniboss Down!";
       if (this.currentRoomType === PATH_TYPES.HARD) return "Hard room clear · 2× score!";
-      if (this.currentRoomType === PATH_TYPES.WAVES) return "Horde cleared!";
+      if (this.currentRoomType === PATH_TYPES.WAVES) {
+        return `Horde cleared! +${this.waveClearBonus} pts · pick a relic`;
+      }
       if (this.currentRoomType === PATH_TYPES.UPGRADE) return "Relic claimed!";
       return "Room Clear!";
     }

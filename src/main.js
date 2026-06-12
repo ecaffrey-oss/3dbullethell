@@ -35,6 +35,7 @@ const game = new Game(document.getElementById("game"), {
   pauseEndRunBtn: document.getElementById("pause-end-run-btn"),
   musicVolume: document.getElementById("music-volume"),
   sfxVolume: document.getElementById("sfx-volume"),
+  deathEffectPicker: document.getElementById("death-effect-picker"),
   achievementsPanel: document.getElementById("achievements-panel"),
   achievementsContainer: document.getElementById("achievements-list"),
   challengesPanel: document.getElementById("challenges-panel"),

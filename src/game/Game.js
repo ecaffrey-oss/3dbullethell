@@ -18,7 +18,7 @@ import { ChanceRoomUI } from "./ChanceRoomUI.js";
 import { Background } from "./Background.js";
 import { applyStatus, updateStatuses } from "./StatusEffects.js";
 import { segmentHitsCircle } from "./BeamUtils.js";
-import { PathUI, PATH_TYPES, MINIBOSS_DROPS, SCORE_MULTIPLIER, SHOP_UPGRADE_CHANCE } from "./PathUI.js";
+import { PathUI, PATH_TYPES, MINIBOSS_DROPS, SCORE_MULTIPLIER, SHOP_UPGRADE_CHANCE, BOSS_PORTAL_COST } from "./PathUI.js";
 import { getChallenge, tryCompleteChallenge, getChallengeRewardLabel } from "./Challenges.js";
 import { createRunAchievementState, evaluateAchievements } from "./Achievements.js";
 import { AchievementsUI } from "./AchievementsUI.js";
@@ -28,6 +28,7 @@ import { AbilitiesUI } from "./AbilitiesUI.js";
 import { AbilitySystem } from "./AbilitySystem.js";
 import { isAbilityUnlocked, getAbility } from "./Abilities.js";
 import { AudioManager } from "./AudioManager.js";
+import { DeathEffects, DEATH_EFFECT_OPTIONS } from "./DeathEffects.js";
 import { DebrisSystem } from "./DebrisSystem.js";
 import { ComboSystem } from "./ComboSystem.js";
 import { createRunSnapshot, restoreRunSnapshot } from "./RunSnapshot.js";
@@ -80,6 +81,7 @@ export class Game {
     this.player = new Player(this.scene);
     this.bulletPool = new BulletPool(this.scene);
     this.debris = new DebrisSystem(this.scene);
+    this.deathEffects = new DeathEffects(this.scene);
     this.companions = new CompanionSystem(this.scene);
     this.hazardSystem = new HazardSystem(this.scene);
     this.arenaHazards = new ArenaHazards(this.scene);
@@ -89,19 +91,35 @@ export class Game {
     this.roomManager.arenaHazards = this.arenaHazards;
     this.roomManager.onEnemyDeathSound = (entity) => {
       this.combo.onKill();
-      this.audio.playSquish(
-        entity?.type === "boss" || entity?.type === "elite",
-        this.combo.squishPitch
-      );
+      const large = entity?.type === "boss" || entity?.type === "elite";
+      const effect = this.audio.getDeathEffect();
+      if (effect === "basic") {
+        this.audio.playBasicDeath(large);
+      } else if (effect === "squish") {
+        this.audio.playSquish(large, this.combo.squishPitch);
+      } else if (effect === "explosion") {
+        this.audio.playExplosion(large);
+      } else if (effect === "elephant") {
+        this.audio.playElephant();
+      }
     };
     this.roomManager.onEnemyDeathVisual = (entity) => {
-      this.debris.spawnFromEnemy(entity);
+      const effect = this.audio.getDeathEffect();
+      if (effect === "squish") {
+        this.deathEffects.spawnPuddle(entity);
+      } else if (effect === "explosion") {
+        this.debris.spawnFromEnemy(entity);
+        this.deathEffects.spawnExplosion(entity);
+      } else if (effect === "elephant") {
+        this.deathEffects.spawnElephant(entity, this.camera);
+      }
     };
 
     this.roomManager.onBossDefeated = () => this.onBossDefeated();
     this.roomManager.onPathChoice = (options, onPick) => this.showPathChoice(options, onPick);
     this.roomManager.onShopOpen = () => this.openShop();
     this.roomManager.onMinibossDrop = () => this.offerMinibossDrop();
+    this.roomManager.onHordeReward = () => this.offerHordeReward();
     this.roomManager.onRoomCleared = (floor, bonus) => {
       if (bonus > 0) this.addScore(bonus);
       this.combo.reset();
@@ -111,6 +129,7 @@ export class Game {
     };
     this.roomManager.onRoomReady = () => {
       this.debris.clear();
+      this.deathEffects.clear();
       this.runAch.roomDamageTaken = false;
       this.runAch.bossDamageTaken = false;
       this.player.respawnPosition();
@@ -217,6 +236,7 @@ export class Game {
     this.bindSaveSlots();
     this.bindBackToSaves();
     this.bindAudioSliders();
+    this.bindDeathEffectPicker();
     this.bindPause();
     window.addEventListener("resize", () => this.onResize());
     window.addEventListener("pagehide", () => {
@@ -254,6 +274,38 @@ export class Game {
 
     music.addEventListener("input", onMusic);
     sfx.addEventListener("input", onSfx);
+  }
+
+  bindDeathEffectPicker() {
+    const root = this.ui.deathEffectPicker;
+    if (!root) return;
+
+    const selected = this.audio.getDeathEffect();
+    root.innerHTML = "";
+    for (const opt of DEATH_EFFECT_OPTIONS) {
+      const label = document.createElement("label");
+      label.className = "death-effect-option";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "death-effect";
+      input.value = opt.id;
+      input.checked = opt.id === selected;
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        this.audio.setDeathEffect(opt.id);
+        this.unlockAudio();
+      });
+      const text = document.createElement("span");
+      text.className = "death-effect-label";
+      text.textContent = opt.label;
+      const hint = document.createElement("span");
+      hint.className = "death-effect-hint";
+      hint.textContent = opt.hint;
+      label.appendChild(input);
+      label.appendChild(text);
+      label.appendChild(hint);
+      root.appendChild(label);
+    }
   }
 
   closeAllMenuTabs() {
@@ -710,7 +762,12 @@ export class Game {
   }
 
   showPathChoice(mapView, onPick) {
-    this.pathUI.showMapChoice(mapView, (nodeId, type) => {
+    const view = { ...mapView, score: this.score };
+    this.pathUI.showMapChoice(view, (nodeId, type) => {
+      if (type === PATH_TYPES.BOSS_PORTAL) {
+        if (this.score < BOSS_PORTAL_COST) return;
+        this.score -= BOSS_PORTAL_COST;
+      }
       onPick(nodeId, type);
       if (type !== PATH_TYPES.SHOP) {
         this.player.respawnPosition();
@@ -791,6 +848,15 @@ export class Game {
     this.openShop();
   }
 
+  offerHordeReward() {
+    if (this.challengeBlocksUpgrades()) return;
+    this.runUpgradeUI.show(this.player.runState, () => {
+      this.companions.sync(this.player.runState, this.player);
+      this.player.maxHealth = this.player.getEffectiveMaxHealth();
+      this.player.syncAuraVisual();
+    });
+  }
+
   offerMinibossDrop() {
     if (this.challengeBlocksUpgrades()) return;
     const choices = [...MINIBOSS_DROPS].sort(() => Math.random() - 0.5).slice(0, 2);
@@ -813,7 +879,8 @@ export class Game {
 
   addScore(amount) {
     const challengeMult = this.activeChallenge?.mods?.scoreMult ?? 1;
-    this.score += Math.floor(amount * SCORE_MULTIPLIER * challengeMult);
+    const runMult = this.player?.runState?.scoreMult ?? 1;
+    this.score += Math.floor(amount * SCORE_MULTIPLIER * challengeMult * runMult);
   }
 
   cleanupRun() {
@@ -1091,7 +1158,14 @@ export class Game {
       );
       this.hazardSystem.updatePlayerTrail(this.player, this.player.runState, simDt);
       this.hazardSystem.updateAura(this.player, this.player.runState, this.roomManager.enemies, simDt);
-      this.companions.update(simDt, this.player, this.bulletPool, this.roomManager.enemies);
+      this.companions.update(
+        simDt,
+        this.player,
+        this.bulletPool,
+        this.roomManager.enemies,
+        this.arena,
+        (enemy) => this.onEnemyKilled(enemy)
+      );
     }
 
     this.bulletPool.update(simDt, this.player, this.roomManager.enemies, this.arena, this.bulletPool);
@@ -1104,6 +1178,7 @@ export class Game {
 
     if (!transitioning && !bossIntro) this.checkCollisions();
     this.debris.update(simDt);
+    this.deathEffects.update(simDt);
     this.updateParticles(simDt);
     if (this.playerLight) this.playerLight.position.set(this.player.x, 3, this.player.z);
     if (this.shakeTimer > 0) this.shakeTimer -= dt;
@@ -1123,6 +1198,24 @@ export class Game {
         lt.chairKills = (lt.chairKills ?? 0) + 1;
       });
       evaluateAchievements(this.meta, this.getAchievementContext());
+    }
+  }
+
+  _spawnExplosionShrapnel(enemy, damage, count = 6) {
+    const pad = enemy.radius + PLAYER_BULLET_RADIUS + 0.15;
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const dirX = Math.sin(a);
+      const dirZ = Math.cos(a);
+      this.bulletPool.spawnPlayerBullet(
+        enemy.x + dirX * pad,
+        enemy.z + dirZ * pad,
+        dirX,
+        dirZ,
+        18,
+        damage,
+        { hitSet: new Set([enemy]) }
+      );
     }
   }
 
@@ -1180,10 +1273,7 @@ export class Game {
               }
             }
             if (b.explode) {
-              for (let i = 0; i < 6; i++) {
-                const a = (i / 6) * Math.PI * 2;
-                this.bulletPool.spawnPlayerBullet(enemy.x, enemy.z, Math.sin(a), Math.cos(a), 18, (b.damage ?? 1) * 0.4);
-              }
+              this._spawnExplosionShrapnel(enemy, (b.damage ?? 1) * 0.4);
             }
             if (b.split && !b._split) {
               b._split = true;
@@ -1267,6 +1357,15 @@ export class Game {
       }
 
       if (this.player.invincibleTimer > 0) continue;
+
+      if (this.player.runState.thornSkin) {
+        const thornKilled = enemy.takeDamage(0.15, true);
+        if (thornKilled) this.onEnemyKilled(enemy);
+      }
+
+      // No-shoot weapons: contact does not harm the player — only bullets do.
+      if (this.player.weapon?.noShoot) continue;
+
       if (this.player.takeDamage()) {
         this.registerPlayerHit();
         this.shakeTimer = 0.3;
@@ -1275,10 +1374,14 @@ export class Game {
 
     const boss = this.roomManager.getBoss();
     if (boss && this.player.alive && this.player.invincibleTimer <= 0 && boss.checkLaserHit(this.player.x, this.player.z, PLAYER_RADIUS)) {
-      if (this.player.takeDamage()) {
-        this.registerPlayerHit();
-        this.shakeTimer = 0.5;
-        this.spawnDeathParticles(this.player.x, this.player.z, COLORS.laser, 12);
+      const laserHits = boss.laserDamage ?? 1;
+      for (let i = 0; i < laserHits; i++) {
+        if (!this.player.alive) break;
+        if (this.player.takeDamage()) {
+          this.registerPlayerHit();
+          this.shakeTimer = 0.5;
+          this.spawnDeathParticles(this.player.x, this.player.z, COLORS.laser, 12);
+        }
       }
     }
   }
@@ -1370,7 +1473,7 @@ export class Game {
       }
     }
     document.getElementById("scale-label").textContent =
-      `HP×${this.roomManager.healthScale.toFixed(1)} · Boss ${Math.max(0, this.roomManager.nextBossIn - this.roomManager.roomsSinceBoss)}` +
+      `HP×${this.roomManager.healthScale.toFixed(1)} · Boss in ${this.roomManager.map.getStepsUntilBoss()}` +
       (this.hardModeActive ? " · HARD" : "");
     const upgradesEl = document.getElementById("upgrades-label");
     if (upgradesEl) {

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { COLORS, ENEMY_BULLET_SPEED } from "./constants.js";
 import { pickBossAttacks, pickPostBossAttacks } from "./BossAttacks.js";
 import { updateStatuses } from "./StatusEffects.js";
+import { isWithinNoShootSuppress } from "./Weapons.js";
 
 const BOSS_MAX_HEALTH = 320;
 const PHASE2_THRESHOLD = 210;
@@ -56,27 +57,38 @@ const MOVEMENT = {
 };
 
 export class Boss {
-  constructor(scene, x = 0, z = -3, movementType = "stalker", rematch = false) {
+  constructor(scene, x = 0, z = -3, movementType = "stalker", rematch = false, options = {}) {
     this.scene = scene;
     this.type = "boss";
     this.movementType = movementType;
     this.movement = MOVEMENT[movementType] ?? MOVEMENT.stalker;
     this._rematch = rematch;
+    this.overlord = options.overlord ?? false;
+    this.onSpawnMinion = options.onSpawnMinion ?? null;
     this.x = x;
     this.z = z;
-    this.health = BOSS_MAX_HEALTH;
-    this.maxHealth = BOSS_MAX_HEALTH;
+    this.health = this.overlord ? 448 : BOSS_MAX_HEALTH;
+    this.maxHealth = this.health;
     this.alive = true;
     this.phase = 1;
     this.phaseTransitionTimer = 0;
-    this.score = 2500;
-    this.config = { color: COLORS.boss };
+    this.score = this.overlord ? 4200 : 2500;
+    this.config = { color: this.overlord ? 0xcc2244 : COLORS.boss };
     this.statuses = [];
     this.statusDamageMult = 1;
+    this.bulletDamageMult = this.overlord ? 2 : 1;
+    this.fireRateMult = this.overlord ? 0.55 : 1;
+    this.laserDamage = this.overlord ? 2 : 1;
+    this.minionTimer = this.overlord ? 2.8 : 0;
+    this._phase2Threshold = this.overlord ? 294 : PHASE2_THRESHOLD;
+    this._phase3Threshold = this.overlord ? 126 : PHASE3_THRESHOLD;
 
     this.activeAttacks = rematch ? pickPostBossAttacks(3) : pickBossAttacks(1, 3);
+    if (this.overlord) {
+      this.activeAttacks = pickPostBossAttacks(3);
+    }
     this.attackIndex = 0;
-    this.attackTimer = 1.5;
+    this.attackTimer = this.overlord ? 0.9 : 1.5;
 
     this.laserState = "idle";
     this.laserTimer = 0;
@@ -88,31 +100,48 @@ export class Boss {
   }
 
   get radius() {
-    return 1.3;
+    return this.overlord ? 1.65 : 1.3;
+  }
+
+  _wrapBulletPool(bulletPool, fn) {
+    const mult = this.bulletDamageMult ?? 1;
+    const origBullet = bulletPool.spawnEnemyBullet.bind(bulletPool);
+    const origBurst = bulletPool.spawnRadialBurst.bind(bulletPool);
+    bulletPool.spawnEnemyBullet = (x, z, dx, dz, speed, opts = {}) =>
+      origBullet(x, z, dx, dz, speed, { ...opts, damage: (opts.damage ?? 1) * mult });
+    bulletPool.spawnRadialBurst = (x, z, count, speed, opts = {}) =>
+      origBurst(x, z, count, speed, { ...opts, damage: (opts.damage ?? 1) * mult });
+    try {
+      fn();
+    } finally {
+      bulletPool.spawnEnemyBullet = origBullet;
+      bulletPool.spawnRadialBurst = origBurst;
+    }
   }
 
   buildMesh() {
     this.group = new THREE.Group();
-    this.bodyMat = new THREE.MeshBasicMaterial({ color: COLORS.boss });
-    this.body = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 0), this.bodyMat);
+    const bodyColor = this.overlord ? 0xcc2244 : COLORS.boss;
+    this.bodyMat = new THREE.MeshBasicMaterial({ color: bodyColor });
+    this.body = new THREE.Mesh(new THREE.IcosahedronGeometry(this.overlord ? 1.45 : 1.2, 0), this.bodyMat);
     this.group.add(this.body);
 
-    this.coreMat = new THREE.MeshBasicMaterial({ color: COLORS.bossCore });
+    this.coreMat = new THREE.MeshBasicMaterial({ color: this.overlord ? 0xff8844 : COLORS.bossCore });
     this.core = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), this.coreMat);
     this.group.add(this.core);
 
     this.orbitRing = new THREE.Mesh(
       new THREE.TorusGeometry(1.6, 0.06, 8, 32),
-      new THREE.MeshBasicMaterial({ color: COLORS.boss, transparent: true, opacity: 0.35 })
+      new THREE.MeshBasicMaterial({ color: bodyColor, transparent: true, opacity: 0.35 })
     );
     this.orbitRing.rotation.x = Math.PI / 2;
     this.group.add(this.orbitRing);
 
     this.group.position.set(this.x, 1.2, this.z);
-    this.group.scale.setScalar(1.4);
+    this.group.scale.setScalar(this.overlord ? 1.85 : 1.4);
     this.scene.add(this.group);
 
-    this.bossLight = new THREE.PointLight(COLORS.bossCore, 3, 16);
+    this.bossLight = new THREE.PointLight(this.overlord ? 0xff6644 : COLORS.bossCore, this.overlord ? 4 : 3, 20);
     this.bossLight.position.set(0, 1, 0);
     this.group.add(this.bossLight);
   }
@@ -158,19 +187,33 @@ export class Boss {
     this.core.rotation.x += dt * 2;
     this.orbitRing.rotation.z += dt * this.phase;
 
+    if (this.overlord && this.onSpawnMinion) {
+      this.minionTimer -= dt;
+      if (this.minionTimer <= 0) {
+        this.onSpawnMinion(this);
+        this.minionTimer = 4.2;
+      }
+    }
+
     if (this.laserState !== "idle") {
-      this.updateLaser(dt, player);
+      if (!isWithinNoShootSuppress(player, this.x, this.z)) {
+        this.updateLaser(dt, player);
+      }
       return;
     }
 
     if (!player.alive) return;
+    if (isWithinNoShootSuppress(player, this.x, this.z)) return;
+
     const attack = this.activeAttacks[this.attackIndex];
     this.attackTimer -= dt;
     if (this.attackTimer <= 0) {
-      if (attack.isLaser) this.startLaserAttack(player);
-      else {
-        attack.exec(this, player, bulletPool);
-        this.attackTimer = attack.cooldown;
+      if (attack.isLaser) {
+        this.startLaserAttack(player);
+        this.attackTimer = attack.cooldown * this.fireRateMult;
+      } else {
+        this._wrapBulletPool(bulletPool, () => attack.exec(this, player, bulletPool));
+        this.attackTimer = attack.cooldown * this.fireRateMult;
         if (!attack.isContinuous) this.attackIndex = (this.attackIndex + 1) % this.activeAttacks.length;
       }
     }
@@ -251,8 +294,8 @@ export class Boss {
     amount *= this.statusDamageMult ?? 1;
     this.health -= amount;
     this.bodyMat.color.setHex(0xffffff);
-    if (this.health <= PHASE3_THRESHOLD && this.phase < 3) this.enterPhase(3);
-    else if (this.health <= PHASE2_THRESHOLD && this.phase < 2) this.enterPhase(2);
+    if (this.health <= this._phase3Threshold && this.phase < 3) this.enterPhase(3);
+    else if (this.health <= this._phase2Threshold && this.phase < 2) this.enterPhase(2);
     if (this.health <= 0) {
       this.die();
       return true;
@@ -265,16 +308,19 @@ export class Boss {
     this.phaseTransitionTimer = 1.8;
     this.laserState = "idle";
     this.laserGroup.visible = false;
-    this.activeAttacks = pickBossAttacks(phase, 3);
+    this.activeAttacks = this.overlord ? pickPostBossAttacks(3) : pickBossAttacks(phase, 3);
     this.attackIndex = 0;
-    this.attackTimer = 1.2;
-    const colors = [COLORS.boss, 0xff4488, 0xff6600];
+    this.attackTimer = 1.2 * this.fireRateMult;
+    const colors = this.overlord
+      ? [0xcc2244, 0xff4488, 0xff2200]
+      : [COLORS.boss, 0xff4488, 0xff6600];
     this.bodyMat.color.setHex(colors[phase - 1]);
   }
 
   getPhaseLabel() {
+    if (this.overlord && this.phaseTransitionTimer > 0) return `Overlord Phase ${this.phase}!`;
     if (this.phaseTransitionTimer > 0) return `Phase ${this.phase}! (${this.movement.name})`;
-    if (this.laserState === "charging") return "Laser charging!";
+    if (this.laserState === "charging") return this.overlord ? "Overlord laser charging!" : "Laser charging!";
     return null;
   }
 

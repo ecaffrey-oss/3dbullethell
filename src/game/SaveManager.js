@@ -8,6 +8,7 @@ const DEFAULT_SLOT = {
   maxFloorsCleared: 0,
   skills: {},
   exclusivePicks: {},
+  bonusPaths: [],
   selectedWeapon: "pulse",
   selectedChallenge: null,
   hardModeEnabled: false,
@@ -36,15 +37,19 @@ export class SaveManager {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return this.createDefaultData();
       const parsed = JSON.parse(raw);
-      const slots = Array.from({ length: SLOT_COUNT }, (_, i) => ({
-        ...structuredClone(DEFAULT_SLOT),
-        ...(parsed.slots?.[i] ?? {}),
-        lifetime: {
-          ...structuredClone(DEFAULT_SLOT.lifetime),
-          ...(parsed.slots?.[i]?.lifetime ?? {}),
-        },
-        activeRun: parsed.slots?.[i]?.activeRun ?? null,
-      }));
+      const slots = Array.from({ length: SLOT_COUNT }, (_, i) => {
+        const merged = {
+          ...structuredClone(DEFAULT_SLOT),
+          ...(parsed.slots?.[i] ?? {}),
+          lifetime: {
+            ...structuredClone(DEFAULT_SLOT.lifetime),
+            ...(parsed.slots?.[i]?.lifetime ?? {}),
+          },
+          activeRun: parsed.slots?.[i]?.activeRun ?? null,
+        };
+        this._migrateSkills(merged.skills);
+        return merged;
+      });
       return {
         activeSlot: parsed.activeSlot ?? 0,
         lastMenuView: parsed.lastMenuView === "profile" ? "profile" : "select",
@@ -61,6 +66,14 @@ export class SaveManager {
       lastMenuView: "select",
       slots: Array.from({ length: SLOT_COUNT }, () => structuredClone(DEFAULT_SLOT)),
     };
+  }
+
+  _migrateSkills(skills) {
+    if (!skills || typeof skills !== "object") return;
+    if (skills.homing_meta > 0) {
+      skills.slayer_meta = Math.max(skills.slayer_meta ?? 0, skills.homing_meta);
+      delete skills.homing_meta;
+    }
   }
 
   saveAll() {
@@ -198,6 +211,22 @@ export class SaveManager {
       if (!s.exclusivePicks) s.exclusivePicks = {};
       s.exclusivePicks[group] = skillId;
     });
+  }
+
+  getBonusPaths() {
+    return [...(this.getActive().bonusPaths ?? [])];
+  }
+
+  addBonusPath(branchId) {
+    if (!branchId) return false;
+    let added = false;
+    this.mutateActive((s) => {
+      if (!s.bonusPaths) s.bonusPaths = [];
+      if (s.bonusPaths.includes(branchId)) return;
+      s.bonusPaths.push(branchId);
+      added = true;
+    });
+    return added;
   }
 
   hasAchievement(id) {

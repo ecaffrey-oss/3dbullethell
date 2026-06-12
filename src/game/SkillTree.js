@@ -162,9 +162,9 @@ export const SKILLS = [
     exclusiveGroup: "ammo",
   },
   {
-    id: "homing_meta",
-    name: "Seeker Mind",
-    description: "Bullets home from run start",
+    id: "slayer_meta",
+    name: "Annihilator",
+    description: "+2 bullet damage from run start",
     cost: 6000,
     maxLevel: 1,
     costScale: 1,
@@ -215,9 +215,9 @@ export const SKILLS = [
     cost: 3200,
     maxLevel: 1,
     costScale: 1,
-    row: 7,
+    row: 8,
     col: 0,
-    requires: ["health"],
+    requires: ["surge"],
   },
   {
     id: "overcharge",
@@ -226,20 +226,9 @@ export const SKILLS = [
     cost: 3400,
     maxLevel: 2,
     costScale: 2.0,
-    row: 7,
+    row: 8,
     col: 1,
-    requires: ["damage"],
-  },
-  {
-    id: "capacitor",
-    name: "Capacitor",
-    description: "+6% fire rate",
-    cost: 3100,
-    maxLevel: 2,
-    costScale: 1.9,
-    row: 7,
-    col: 2,
-    requires: ["firerate"],
+    requires: ["crit2"],
   },
   {
     id: "steady_eye",
@@ -248,9 +237,20 @@ export const SKILLS = [
     cost: 3300,
     maxLevel: 2,
     costScale: 2.0,
-    row: 7,
+    row: 8,
+    col: 2,
+    requires: ["heal_power"],
+  },
+  {
+    id: "capacitor",
+    name: "Capacitor",
+    description: "+6% fire rate",
+    cost: 3100,
+    maxLevel: 2,
+    costScale: 1.9,
+    row: 8,
     col: 3,
-    requires: ["crit"],
+    requires: ["focus_core"],
   },
   {
     id: "flux_weave",
@@ -259,71 +259,150 @@ export const SKILLS = [
     cost: 3000,
     maxLevel: 2,
     costScale: 1.9,
-    row: 7,
+    row: 8,
     col: 4,
-    requires: ["speed"],
+    requires: ["dodge"],
   },
   {
-    id: "unlock_rail",
-    name: "Rail License",
-    description: "Permanently unlock Rail weapon",
+    id: "unlock_ember_lance",
+    name: "Ember Lance",
+    description: "Unlock scorching pierce rifle",
     cost: 4200,
     maxLevel: 1,
     costScale: 1,
-    row: 8,
+    row: 11,
     col: 0,
-    requires: ["damage"],
-    grantUnlock: "rail",
+    requires: ["pierce_meta"],
+    grantUnlock: "ember_lance",
   },
   {
-    id: "unlock_beam",
-    name: "Beam License",
-    description: "Permanently unlock Beam weapon",
+    id: "unlock_cryo_needle",
+    name: "Cryo Needle",
+    description: "Unlock homing frost darts",
     cost: 4800,
     maxLevel: 1,
     costScale: 1,
-    row: 8,
+    row: 11,
     col: 1,
-    requires: ["capacitor"],
-    grantUnlock: "beam",
+    requires: ["ricochet_meta"],
+    grantUnlock: "cryo_needle",
   },
   {
-    id: "unlock_shotgun",
-    name: "Shotgun License",
-    description: "Permanently unlock Shotgun weapon",
+    id: "unlock_arc_splicer",
+    name: "Arc Splicer",
+    description: "Unlock ricochet arc gun",
     cost: 5500,
     maxLevel: 1,
     costScale: 1,
-    row: 8,
+    row: 11,
     col: 2,
-    requires: ["overcharge"],
-    grantUnlock: "shotgun",
+    requires: ["slayer_meta"],
+    grantUnlock: "arc_splicer",
   },
   {
-    id: "unlock_storm",
-    name: "Storm License",
-    description: "Permanently unlock Storm weapon",
-    cost: 7500,
-    maxLevel: 1,
-    costScale: 1,
-    row: 8,
-    col: 3,
-    requires: ["steady_eye"],
-    grantUnlock: "storm",
-  },
-  {
-    id: "unlock_cluster",
-    name: "Cluster License",
-    description: "Permanently unlock Cluster weapon",
+    id: "unlock_helix_drill",
+    name: "Helix Drill",
+    description: "Unlock spiral twin bore",
     cost: 6200,
     maxLevel: 1,
     costScale: 1,
-    row: 8,
+    row: 11,
+    col: 3,
+    requires: ["steady_eye"],
+    grantUnlock: "helix_drill",
+  },
+  {
+    id: "unlock_gravity_well",
+    name: "Gravity Well",
+    description: "Unlock slow AOE orbs",
+    cost: 7500,
+    maxLevel: 1,
+    costScale: 1,
+    row: 11,
     col: 4,
-    requires: ["bulwark"],
-    grantUnlock: "cluster",
+    requires: ["aoe_meta"],
+    grantUnlock: "gravity_well",
+  },
+  {
+    id: "new_path",
+    name: "New Path",
+    description: "Unlock another mastery branch",
+    cost: 10000,
+    maxLevel: 2,
+    costScale: 1,
+    row: 12,
+    col: 2,
+    requiresAnyBranch: true,
+    requires: [
+      "unlock_ember_lance",
+      "unlock_cryo_needle",
+      "unlock_arc_splicer",
+      "unlock_helix_drill",
+      "unlock_gravity_well",
+    ],
   },
 ];
+
+export const MASTERY_BRANCHES = ["crit", "lifesteal", "evasion"];
+
+const BRANCH_LABELS = {
+  crit: "Keen Path",
+  lifesteal: "Siphon Path",
+  evasion: "Phase Path",
+};
+
+const SKILL_BRANCH = {
+  surge: "crit",
+  crit: "crit",
+  crit2: "crit",
+  pierce_meta: "crit",
+  overcharge: "crit",
+  unlock_ember_lance: "crit",
+  bulwark: "crit",
+  lifesteal: "lifesteal",
+  heal_power: "lifesteal",
+  ricochet_meta: "lifesteal",
+  slayer_meta: "lifesteal",
+  steady_eye: "lifesteal",
+  unlock_cryo_needle: "lifesteal",
+  unlock_arc_splicer: "lifesteal",
+  unlock_helix_drill: "lifesteal",
+  evasion: "evasion",
+  dodge: "evasion",
+  aoe_meta: "evasion",
+  flux_weave: "evasion",
+  capacitor: "evasion",
+  focus_core: "evasion",
+  unlock_gravity_well: "evasion",
+};
+
+export function getSkillBranch(skillId) {
+  return SKILL_BRANCH[skillId] ?? "core";
+}
+
+export function countWeaponLicenses(meta) {
+  return SKILLS.filter((s) => s.grantUnlock && meta.getSkillLevel(s.id) > 0).length;
+}
+
+export function isBranchAccessible(meta, branch) {
+  if (branch === "core") return true;
+  const mastery = meta.getExclusivePick("mastery");
+  if (!mastery) return false;
+  if (branch === mastery) return true;
+  return meta.getBonusPaths().includes(branch);
+}
+
+function skillOnLockedBranch(meta, skill) {
+  const branch = getSkillBranch(skill.id);
+  return branch !== "core" && !isBranchAccessible(meta, branch);
+}
+
+export function getRemainingBonusBranches(meta) {
+  const mastery = meta.getExclusivePick("mastery");
+  if (!mastery) return [];
+  const bonus = meta.getBonusPaths();
+  return MASTERY_BRANCHES.filter((b) => b !== mastery && !bonus.includes(b));
+}
 
 export function getSkillCost(skill, level) {
   return Math.floor(skill.cost * Math.pow(skill.costScale, level));
@@ -360,7 +439,7 @@ export function getSkillBonuses(meta) {
     lifestealChance: lifesteal * 0.07,
     invincibleBonus: evasion * 0.12,
     startPierce: meta.getSkillLevel("pierce_meta") > 0 ? 1 : 0,
-    startHoming: meta.getSkillLevel("homing_meta") > 0,
+    startSlayerDamage: meta.getSkillLevel("slayer_meta") > 0 ? 2 : 0,
     startBounce: meta.getSkillLevel("ricochet_meta") > 0,
     startAoe: meta.getSkillLevel("aoe_meta") > 0,
     surgeLevels: surge,
@@ -377,10 +456,21 @@ function skillHasPrereqs(meta, skill) {
 }
 
 function skillUnlocked(meta, skill) {
+  if (skill.id === "new_path") {
+    if (!meta.getExclusivePick("mastery")) return false;
+    if (getRemainingBonusBranches(meta).length === 0) return false;
+    if (meta.getSkillLevel("new_path") >= 2) return false;
+    return skillHasPrereqs(meta, skill);
+  }
+  if (skillOnLockedBranch(meta, skill)) return false;
   if (!skillHasPrereqs(meta, skill)) return false;
   if (skill.requiresExclusive) {
     for (const [group, pick] of Object.entries(skill.requiresExclusive)) {
-      if (meta.getExclusivePick(group) !== pick) return false;
+      if (group === "mastery") {
+        if (!isBranchAccessible(meta, pick)) return false;
+      } else if (meta.getExclusivePick(group) !== pick) {
+        return false;
+      }
     }
   }
   if (skill.exclusiveGroup) {
@@ -391,12 +481,19 @@ function skillUnlocked(meta, skill) {
 }
 
 const TREE_COLS = 5;
-const TREE_ROWS = 9;
+const TREE_ROWS = 13;
 const CELL_W = 100;
 const CELL_H = 72;
+const SKILL_NODE_W = 86;
+const SKILL_NODE_H = 62;
 
-function nodeCenter(col, row) {
-  return { x: col * CELL_W + CELL_W / 2, y: row * CELL_H + CELL_H / 2 };
+function skillNodeLayout(col, row) {
+  const x = col * CELL_W + (CELL_W - SKILL_NODE_W) / 2;
+  const y = row * CELL_H + (CELL_H - SKILL_NODE_H) / 2;
+  const cx = col * CELL_W + CELL_W / 2;
+  const top = y;
+  const bottom = y + SKILL_NODE_H;
+  return { x, y, cx, top, bottom };
 }
 
 export class SkillTreeUI {
@@ -433,27 +530,33 @@ export class SkillTreeUI {
 
     const tree = document.createElement("div");
     tree.className = "skill-tree skill-tree-long";
+    tree.style.width = `${TREE_COLS * CELL_W}px`;
+    tree.style.height = `${TREE_ROWS * CELL_H}px`;
 
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("class", "skill-tree-lines");
+    svg.setAttribute("class", "skill-tree-lines skill-tree-lines-long");
     svg.setAttribute("viewBox", `0 0 ${TREE_COLS * CELL_W} ${TREE_ROWS * CELL_H}`);
     tree.appendChild(svg);
 
     const nodes = document.createElement("div");
     nodes.className = "skill-tree-nodes skill-tree-nodes-long";
+    nodes.style.width = `${TREE_COLS * CELL_W}px`;
+    nodes.style.height = `${TREE_ROWS * CELL_H}px`;
 
     for (const skill of SKILLS) {
       for (const req of skill.requires ?? []) {
         const from = SKILLS.find((s) => s.id === req);
         if (!from) continue;
-        const a = nodeCenter(from.col, from.row);
-        const b = nodeCenter(skill.col, skill.row);
+        const a = skillNodeLayout(from.col, from.row);
+        const b = skillNodeLayout(skill.col, skill.row);
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", String(a.x));
-        line.setAttribute("y1", String(a.y));
-        line.setAttribute("x2", String(b.x));
-        line.setAttribute("y2", String(b.y));
-        const lit = skillHasPrereqs(this.meta, skill);
+        line.setAttribute("x1", String(a.cx));
+        line.setAttribute("y1", String(a.bottom));
+        line.setAttribute("x2", String(b.cx));
+        line.setAttribute("y2", String(b.top));
+        const lit = skill.requiresAnyBranch
+          ? (skill.requires ?? []).some((id) => this.meta.getSkillLevel(id) > 0)
+          : skillHasPrereqs(this.meta, skill);
         line.setAttribute("class", "tree-line" + (lit ? " tree-line-lit" : ""));
         svg.appendChild(line);
       }
@@ -461,7 +564,9 @@ export class SkillTreeUI {
 
     for (const skill of SKILLS) {
       const level = this.meta.getSkillLevel(skill.id);
-      const maxed = level >= skill.maxLevel;
+      const maxed =
+        level >= skill.maxLevel ||
+        (skill.id === "new_path" && getRemainingBonusBranches(this.meta).length === 0);
       const hasPrereqs = skillHasPrereqs(this.meta, skill);
       const unlocked = skillUnlocked(this.meta, skill);
       const cost = maxed ? 0 : getSkillCost(skill, level);
@@ -470,7 +575,8 @@ export class SkillTreeUI {
         this.meta.getExclusivePick(skill.exclusiveGroup) &&
         this.meta.getExclusivePick(skill.exclusiveGroup) !== skill.id &&
         level === 0;
-      const preview = !hasPrereqs && level === 0;
+      const branchLocked = skillOnLockedBranch(this.meta, skill);
+      const preview = (!hasPrereqs && level === 0) || branchLocked;
 
       const node = document.createElement("button");
       node.type = "button";
@@ -478,10 +584,15 @@ export class SkillTreeUI {
         "skill-node" +
         (maxed ? " maxed" : "") +
         (preview ? " preview" : "") +
+        (branchLocked ? " branch-locked" : "") +
         (!unlocked || blocked ? " locked" : "") +
+        (skill.id === "new_path" ? " path-unlock" : "") +
         (skill.exclusiveGroup ? " exclusive" : "");
-      node.style.gridRow = skill.row + 1;
-      node.style.gridColumn = skill.col + 1;
+      const pos = skillNodeLayout(skill.col, skill.row);
+      node.style.left = `${pos.x}px`;
+      node.style.top = `${pos.y}px`;
+      node.style.width = `${SKILL_NODE_W}px`;
+      node.style.height = `${SKILL_NODE_H}px`;
       node.disabled =
         preview ||
         !unlocked ||
@@ -490,10 +601,15 @@ export class SkillTreeUI {
         this.meta.bankScore < cost ||
         (skill.grantUnlock && (this.meta.hasUnlock(skill.grantUnlock) || level > 0));
 
-      let costLabel = preview ? "???" : !unlocked ? "🔒" : maxed ? "MAX" : `${cost} pts`;
+      let costLabel = preview ? (branchLocked ? "Remote path" : "???") : !unlocked ? "🔒" : maxed ? "MAX" : `${cost} pts`;
       if (blocked) costLabel = "Other path";
       if (skill.exclusiveGroup && level === 0 && !blocked && !preview) costLabel += " · pick 1";
-      if (skill.grantUnlock && level === 0 && !blocked && !preview) costLabel = `${cost} pts · unlock`;
+      if (skill.id === "new_path" && level === 0 && !blocked && !preview) {
+        costLabel = `${cost} pts · pick branch`;
+      }
+      if (skill.grantUnlock && level === 0 && !blocked && !preview && skill.id !== "new_path") {
+        costLabel = `${cost} pts · unlock`;
+      }
 
       node.innerHTML = `
         <span class="skill-name">${skill.name}</span>
@@ -503,11 +619,31 @@ export class SkillTreeUI {
       `;
       node.addEventListener("click", () => {
         if (preview || !unlocked || maxed || blocked || !this.meta.spendScore(cost)) return;
+
+        if (skill.id === "new_path") {
+          const remaining = getRemainingBonusBranches(this.meta);
+          if (!remaining.length) return;
+          if (remaining.length === 1) {
+            this.meta.addBonusPath(remaining[0]);
+            this.meta.setSkillLevel(skill.id, level + 1);
+            this.render();
+            this.onUpdate?.();
+            return;
+          }
+          this.showBonusPathPicker(remaining, () => {
+            this.meta.setSkillLevel(skill.id, level + 1);
+            this.render();
+            this.onUpdate?.();
+          });
+          return;
+        }
+
         if (skill.exclusiveGroup && level === 0) {
           this.meta.setExclusivePick(skill.exclusiveGroup, skill.id);
         }
         this.meta.setSkillLevel(skill.id, level + 1);
-        if (skill.grantUnlock && level === 0) {
+        const boughtLicense = skill.grantUnlock && level === 0;
+        if (boughtLicense) {
           this.meta.grantUnlock(skill.grantUnlock);
         }
         this.render();
@@ -518,5 +654,43 @@ export class SkillTreeUI {
 
     tree.appendChild(nodes);
     this.container.appendChild(tree);
+  }
+
+  showBonusPathPicker(options, onComplete) {
+    if (options.length === 1) {
+      this.meta.addBonusPath(options[0]);
+      onComplete?.();
+      return;
+    }
+
+    const wrap = document.createElement("div");
+    wrap.className = "bonus-path-picker";
+    wrap.innerHTML = `
+      <p class="bonus-path-title">Choose a skill path to unlock</p>
+      <div class="bonus-path-grid"></div>
+    `;
+    const grid = wrap.querySelector(".bonus-path-grid");
+
+    for (const branch of options) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "path-card bonus-path-card";
+      btn.innerHTML = `
+        <span class="skill-name">${BRANCH_LABELS[branch]}</span>
+        <span class="skill-desc">Unlock the rest of the ${branch} branch</span>
+      `;
+      btn.addEventListener("click", () => {
+        this.meta.addBonusPath(branch);
+        wrap.remove();
+        onComplete?.();
+        if (!onComplete) {
+          this.render();
+          this.onUpdate?.();
+        }
+      });
+      grid.appendChild(btn);
+    }
+
+    this.container.appendChild(wrap);
   }
 }

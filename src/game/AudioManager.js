@@ -1,8 +1,12 @@
 const AUDIO_SETTINGS_KEY = "bulletHell3d_audio";
 const soundUrl = (file) => `${import.meta.env.BASE_URL}sounds/${file}`;
 const MUSIC_URL = soundUrl("music.mp3");
+const EXPLOSION_URL = soundUrl("deltarune-explosion.mp3");
+const ELEPHANT_URL = soundUrl("elephant-charge.mp3");
 const MUSIC_BASE_GAIN = 0.14;
 const SFX_BASE_GAIN = 0.42;
+
+export const DEATH_EFFECT_IDS = ["basic", "squish", "explosion", "elephant"];
 
 export class AudioManager {
   constructor() {
@@ -10,8 +14,12 @@ export class AudioManager {
     this.musicGain = null;
     this.sfx = null;
     this.squishBuffer = null;
+    this.explosionBuffer = null;
+    this.elephantBuffer = null;
     this.musicBuffer = null;
     this.squishLoad = null;
+    this.explosionLoad = null;
+    this.elephantLoad = null;
     this.musicLoad = null;
     this.musicSource = null;
     this.musicPlaying = false;
@@ -21,19 +29,23 @@ export class AudioManager {
     const saved = this._loadSettings();
     this.musicVolume = saved.music;
     this.sfxVolume = saved.sfx;
+    this.deathEffect = saved.deathEffect;
   }
 
   _loadSettings() {
     try {
       const raw = localStorage.getItem(AUDIO_SETTINGS_KEY);
-      if (!raw) return { music: 0.22, sfx: 0.5 };
+      if (!raw) return { music: 0.22, sfx: 0.5, deathEffect: "basic" };
       const parsed = JSON.parse(raw);
+      const effect = parsed.deathEffect ?? "basic";
+      const migrated = effect === "puddle" ? "squish" : effect;
       return {
         music: this._clamp01(parsed.music ?? 0.22),
         sfx: this._clamp01(parsed.sfx ?? 0.5),
+        deathEffect: DEATH_EFFECT_IDS.includes(migrated) ? migrated : "basic",
       };
     } catch {
-      return { music: 0.22, sfx: 0.5 };
+      return { music: 0.22, sfx: 0.5, deathEffect: "basic" };
     }
   }
 
@@ -41,11 +53,25 @@ export class AudioManager {
     try {
       localStorage.setItem(
         AUDIO_SETTINGS_KEY,
-        JSON.stringify({ music: this.musicVolume, sfx: this.sfxVolume })
+        JSON.stringify({
+          music: this.musicVolume,
+          sfx: this.sfxVolume,
+          deathEffect: this.deathEffect,
+        })
       );
     } catch {
       /* storage optional */
     }
+  }
+
+  getDeathEffect() {
+    return this.deathEffect;
+  }
+
+  setDeathEffect(id) {
+    if (!DEATH_EFFECT_IDS.includes(id)) return;
+    this.deathEffect = id;
+    this.saveSettings();
   }
 
   getMusicVolumePercent() {
@@ -82,6 +108,8 @@ export class AudioManager {
     this._applyMusicGain();
     this._applySfxGain();
     this.squishLoad = this._loadSquish();
+    this.explosionLoad = this._loadExplosion();
+    this.elephantLoad = this._loadElephant();
     this.musicLoad = this._loadMusic();
     this._resumeContext();
   }
@@ -155,6 +183,80 @@ export class AudioManager {
     } catch {
       /* music optional */
     }
+  }
+
+  async _loadExplosion() {
+    try {
+      const res = await fetch(EXPLOSION_URL);
+      if (!res.ok) return;
+      const data = await res.arrayBuffer();
+      if (!this.ctx) return;
+      this.explosionBuffer = await this.ctx.decodeAudioData(data);
+    } catch {
+      /* explosion optional */
+    }
+  }
+
+  async _loadElephant() {
+    try {
+      const res = await fetch(ELEPHANT_URL);
+      if (!res.ok) return;
+      const data = await res.arrayBuffer();
+      if (!this.ctx) return;
+      this.elephantBuffer = await this.ctx.decodeAudioData(data);
+    } catch {
+      /* elephant optional */
+    }
+  }
+
+  playBasicDeath(large = false) {
+    if (!this.unlocked || !this.ctx || !this.sfx) return;
+    const t0 = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(large ? 200 : 320, t0);
+    osc.frequency.exponentialRampToValueAtTime(large ? 110 : 180, t0 + 0.07);
+    gain.gain.setValueAtTime(large ? 0.16 : 0.1, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09);
+    osc.connect(gain);
+    gain.connect(this.sfx);
+    osc.start(t0);
+    osc.stop(t0 + 0.1);
+  }
+
+  async playElephant() {
+    if (!this.unlocked || !this.ctx || !this.sfx) return;
+    if (this.elephantLoad) await this.elephantLoad;
+    if (!this.elephantBuffer) return;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.elephantBuffer;
+    src.playbackRate.value = 1;
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.58;
+
+    src.connect(gain);
+    gain.connect(this.sfx);
+    src.start();
+  }
+
+  async playExplosion(large = false) {
+    if (!this.unlocked || !this.ctx || !this.sfx) return;
+    if (this.explosionLoad) await this.explosionLoad;
+    if (!this.explosionBuffer) return;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.explosionBuffer;
+    src.playbackRate.value = large ? 0.92 : 1 + (Math.random() - 0.5) * 0.06;
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = large ? 0.62 : 0.5;
+
+    src.connect(gain);
+    gain.connect(this.sfx);
+    src.start();
   }
 
   async playSquish(large = false, pitchMult = 1) {

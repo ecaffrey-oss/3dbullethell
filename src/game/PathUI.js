@@ -1,3 +1,10 @@
+import {
+  ROUTE_NODE_H,
+  ROUTE_NODE_W,
+  generateRouteDecorations,
+  layoutRouteNodes,
+} from "./RouteMapLayout.js";
+
 export const SCORE_MULTIPLIER = 0.32;
 
 export const PATH_TYPES = {
@@ -11,9 +18,12 @@ export const PATH_TYPES = {
   CHANCE: "chance",
   WAVES: "waves",
   UPGRADE: "upgrade",
+  BOSS_PORTAL: "boss_portal",
 };
 
-export const ROUTE_GUIDE = "Scroll the route tree — lit nodes are your next pick.";
+export const ROUTE_GUIDE = "Click a highlighted node — two or three routes branch ahead each step.";
+
+export const BOSS_PORTAL_COST = 500;
 
 export const SHOP_UPGRADE_CHANCE = 0.1;
 
@@ -29,8 +39,12 @@ export const MINIBOSS_DROPS = [
   { id: "heal", name: "Restore 1 HP", apply: (p) => { p.health = Math.min(p.maxHealth, p.health + 1); } },
 ];
 
-const ROUTE_CELL_W = 92;
-const ROUTE_CELL_H = 64;
+function decorTintCss(tint) {
+  const r = (tint >> 16) & 255;
+  const g = (tint >> 8) & 255;
+  const b = tint & 255;
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 export class PathUI {
   constructor(container, shopContainer) {
@@ -43,6 +57,8 @@ export class PathUI {
     const choices = mapView?.choices ?? (Array.isArray(mapView) ? mapView : []);
     const floor = mapView?.floor ?? (mapView?.depth ?? 0) + 1;
     const tree = mapView?.tree;
+    const stepsUntilBoss = mapView?.stepsUntilBoss;
+    const floorIndex = mapView?.floorIndex ?? 0;
 
     if (!choices.length) {
       this.container.innerHTML = `<div class="menu-shell menu-repel path-inner map-panel"><div class="menu-shell-header"><span class="menu-shell-badge">ROUTE</span><div class="draft-title">Generating paths…</div></div></div>`;
@@ -50,8 +66,10 @@ export class PathUI {
     }
 
     const bossOnly = mapView?.bossOnly || choices[0]?.bossOnly;
-    const title = bossOnly ? `Floor ${floor} — Boss Ahead` : `Floor ${floor} — Choose Your Route`;
-    const guide = bossOnly ? "The boss blocks your path. No detours." : ROUTE_GUIDE;
+    const title = bossOnly
+      ? `Floor ${floor} — Boss Ahead`
+      : `Floor ${floor} · Act ${floorIndex + 1} — ${stepsUntilBoss ?? "?"} rooms to boss`;
+    const guide = bossOnly ? "Click the boss node to begin the fight." : ROUTE_GUIDE;
 
     this.container.innerHTML = `
       <div class="menu-shell menu-repel path-inner map-panel route-tree-panel">
@@ -61,94 +79,129 @@ export class PathUI {
         </div>
         <p class="route-guide">${guide}</p>
         <div class="route-tree-scroll" id="route-tree-scroll"></div>
-        <div class="path-grid map-choices${bossOnly ? " boss-only" : ""}"></div>
       </div>
     `;
 
     if (tree?.nodes?.length) {
-      this._renderRouteTree(tree, choices, onPick, bossOnly);
-    }
-
-    const grid = this.container.querySelector(".map-choices");
-    for (const opt of choices) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "path-card";
-      btn.innerHTML = `
-        <span class="path-icon">${opt.icon}</span>
-        <span class="skill-name">${opt.name}</span>
-        <span class="skill-desc">${opt.desc}</span>
-      `;
-      btn.addEventListener("click", () => {
-        this.hide();
-        onPick(opt.nodeId, opt.type);
-      });
-      grid.appendChild(btn);
+      this._renderRouteTree(tree, choices, onPick, mapView?.floorSeed ?? 1, mapView?.score ?? 0);
     }
   }
 
-  _renderRouteTree(tree, choices, onPick, bossOnly) {
+  _renderRouteTree(tree, choices, onPick, floorSeed = 1, score = 0) {
     const scroll = this.container.querySelector("#route-tree-scroll");
     const nodes = tree.nodes;
     const edges = tree.edges ?? [];
-    const minCol = Math.min(...nodes.map((n) => n.col));
-    const maxCol = Math.max(...nodes.map((n) => n.col));
-    const minRow = tree.minRow ?? Math.min(...nodes.map((n) => n.row));
-    const cols = maxCol - minCol + 1;
-    const rows = (tree.maxRow ?? Math.max(...nodes.map((n) => n.row))) - minRow + 1;
-    const width = Math.max(cols * ROUTE_CELL_W + 40, 320);
-    const height = rows * ROUTE_CELL_H + 48;
     const choiceIds = new Set(choices.map((c) => c.nodeId));
+    const maxRow = tree.maxRow ?? Math.max(...nodes.map((n) => n.row));
+    const layout = layoutRouteNodes(nodes, maxRow, floorSeed);
+    const { anchor, width, height } = layout;
+    const decorations = generateRouteDecorations(floorSeed, layout, nodes);
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
 
     scroll.innerHTML = `
       <div class="route-tree skill-tree" style="width:${width}px;height:${height}px">
+        <div class="route-tree-decor"></div>
         <svg class="skill-tree-lines route-tree-lines" viewBox="0 0 ${width} ${height}"></svg>
-        <div class="skill-tree-nodes route-tree-nodes" style="grid-template-columns: repeat(${cols}, ${ROUTE_CELL_W}px); grid-template-rows: repeat(${rows}, ${ROUTE_CELL_H}px);"></div>
+        <div class="route-tree-nodes"></div>
       </div>
     `;
 
+    const decorLayer = scroll.querySelector(".route-tree-decor");
     const svg = scroll.querySelector(".route-tree-lines");
     const nodeLayer = scroll.querySelector(".route-tree-nodes");
-    const nodeById = new Map(nodes.map((n) => [n.id, n]));
 
-    const nodeCenter = (n) => ({
-      x: (n.col - minCol) * ROUTE_CELL_W + ROUTE_CELL_W / 2 + 20,
-      y: (n.row - minRow) * ROUTE_CELL_H + ROUTE_CELL_H / 2 + 16,
-    });
+    for (const d of decorations) {
+      const el = document.createElement("div");
+      el.className = `route-decor route-decor-${d.type}`;
+      el.style.left = `${d.x}px`;
+      el.style.top = `${d.y}px`;
+      el.style.width = `${d.size}px`;
+      el.style.height = `${d.size}px`;
+      el.style.setProperty("--decor-tint", decorTintCss(d.tint));
+      el.style.transform = `rotate(${d.rot}rad)`;
+      decorLayer.appendChild(el);
+    }
+
+    const drawLine = (x1, y1, x2, y2, lit) => {
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", String(x1));
+      line.setAttribute("y1", String(y1));
+      line.setAttribute("x2", String(x2));
+      line.setAttribute("y2", String(y2));
+      line.setAttribute("class", "tree-line route-tree-line" + (lit ? " tree-line-lit" : ""));
+      svg.appendChild(line);
+    };
+
+    const atStart = !tree.currentNodeId;
+    const choiceNodes = nodes.filter((n) => n.isChoice);
+    const currentNode = nodes.find((n) => n.isCurrent);
+
+    if (atStart) {
+      for (const n of choiceNodes) {
+        drawLine(anchor.cx, anchor.y + anchor.h, n.layoutCx, n.layoutY, true);
+      }
+    } else if (currentNode) {
+      for (const n of choiceNodes) {
+        drawLine(
+          currentNode.layoutCx,
+          currentNode.layoutY + ROUTE_NODE_H,
+          n.layoutCx,
+          n.layoutY,
+          true
+        );
+      }
+    }
 
     for (const edge of edges) {
       const a = nodeById.get(edge.fromId);
       const b = nodeById.get(edge.toId);
       if (!a || !b) continue;
-      const p1 = nodeCenter(a);
-      const p2 = nodeCenter(b);
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", String(p1.x));
-      line.setAttribute("y1", String(p1.y));
-      line.setAttribute("x2", String(p2.x));
-      line.setAttribute("y2", String(p2.y));
-      const lit = a.visited && (b.visited || b.isChoice);
-      line.setAttribute("class", "tree-line" + (lit ? " tree-line-lit" : ""));
-      svg.appendChild(line);
+      const lit =
+        a.isChoice ||
+        b.isChoice ||
+        b.isBoss ||
+        a.isCurrent ||
+        (atStart && a.row === 0);
+      drawLine(a.layoutCx, a.layoutY + ROUTE_NODE_H, b.layoutCx, b.layoutY, lit);
+    }
+
+    if (atStart) {
+      const anchorEl = document.createElement("div");
+      anchorEl.className = "route-node route-node-anchor";
+      anchorEl.style.left = `${anchor.x}px`;
+      anchorEl.style.top = `${anchor.y}px`;
+      anchorEl.style.width = `${anchor.w}px`;
+      anchorEl.style.height = `${anchor.h}px`;
+      anchorEl.innerHTML = `<span class="route-node-icon">◎</span><span class="skill-name">Now</span>`;
+      nodeLayer.appendChild(anchorEl);
     }
 
     for (const n of nodes) {
       const btn = document.createElement("button");
       btn.type = "button";
-      const clickable = !bossOnly && choiceIds.has(n.id);
+      const isPortal = n.type === PATH_TYPES.BOSS_PORTAL;
+      const portalBlocked = isPortal && choiceIds.has(n.id) && score < BOSS_PORTAL_COST;
+      const clickable = choiceIds.has(n.id) && !portalBlocked;
+      const isFuturePreview = !clickable && !n.isCurrent && !n.isBoss;
       btn.className =
         "route-node skill-node" +
+        (clickable ? " route-node-choice" : "") +
+        (n.isBoss ? " route-node-boss" : "") +
+        (isPortal ? " route-node-portal" : "") +
+        (portalBlocked ? " route-node-unaffordable" : "") +
         (n.isCurrent ? " route-node-current" : "") +
-        (n.visited ? " route-node-visited" : "") +
-        (n.isChoice ? " route-node-choice" : "") +
-        (!clickable ? " route-node-preview" : "");
-      btn.style.gridColumn = n.col - minCol + 1;
-      btn.style.gridRow = n.row - minRow + 1;
+        (isFuturePreview ? " route-node-preview" : "");
+      btn.style.left = `${n.layoutX}px`;
+      btn.style.top = `${n.layoutY}px`;
+      btn.style.width = `${ROUTE_NODE_W}px`;
+      btn.style.height = `${ROUTE_NODE_H}px`;
+      const stepLabel = n.isBoss ? "Boss" : n.isCurrent ? n.name : `Step ${n.row + 1}`;
+      const portalCostLabel = isPortal ? ` · ${BOSS_PORTAL_COST} pts` : "";
       btn.title = n.desc ?? n.name;
       btn.innerHTML = `
         <span class="route-node-icon">${n.icon}</span>
-        <span class="skill-name">${n.name}</span>
-        <span class="skill-desc">F${n.depth + 1}</span>
+        <span class="skill-name">${n.isCurrent ? "You are here" : n.name}</span>
+        <span class="skill-desc">${stepLabel}${portalCostLabel}${portalBlocked ? " · need score" : ""}</span>
       `;
       if (clickable) {
         btn.addEventListener("click", () => {
@@ -163,10 +216,10 @@ export class PathUI {
       nodeLayer.appendChild(btn);
     }
 
-    const current = nodes.find((n) => n.isCurrent);
-    if (current) {
-      const cy = (current.row - minRow) * ROUTE_CELL_H;
-      scroll.scrollTop = Math.max(0, cy - scroll.clientHeight * 0.35);
+    if (currentNode) {
+      scroll.scrollTop = Math.max(0, currentNode.layoutY - 24);
+    } else {
+      scroll.scrollTop = 0;
     }
   }
 

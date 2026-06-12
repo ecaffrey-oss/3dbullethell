@@ -52,7 +52,7 @@ export class BulletPool {
       laser: opts.laser ?? false,
       statuses: opts.statuses ?? [],
       life: opts.laser ? 0.35 : opts.boomerang ? 6 : bouncing ? 3.5 : 999,
-      hitSet: new Set(),
+      hitSet: opts.hitSet ?? new Set(),
       bounce: bouncing,
       bouncesLeft: opts.bounces ?? 5,
       boomerang: opts.boomerang ?? false,

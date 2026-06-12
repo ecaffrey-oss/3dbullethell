@@ -218,6 +218,41 @@ export const UNLOCKABLES = [
     desc: "Nova burst that heals you · E · 5s cooldown",
     source: { achievement: "hard_mode_unbroken" },
   },
+  {
+    id: "beam",
+    type: "weapon",
+    name: "Beam",
+    desc: "Piercing damage line",
+    source: { achievement: "fortress" },
+  },
+  {
+    id: "rail",
+    type: "weapon",
+    name: "Rail",
+    desc: "Heavy pierce bolt",
+    source: { achievement: "veteran" },
+  },
+  {
+    id: "cluster",
+    type: "weapon",
+    name: "Cluster",
+    desc: "Explosive rounds · −1 max HP",
+    source: { achievement: "boss_triple" },
+  },
+  {
+    id: "shotgun",
+    type: "weapon",
+    name: "Shotgun",
+    desc: "7-pellet spread burst",
+    source: { achievement: "fat_stack" },
+  },
+  {
+    id: "storm",
+    type: "weapon",
+    name: "Storm",
+    desc: "Homing bullet drizzle",
+    source: { achievement: "million_damage" },
+  },
 ];
 
 const RELIC_EFFECTS = {

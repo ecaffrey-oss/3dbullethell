@@ -28,6 +28,8 @@ export function serializeRunState(rs) {
     auraRadius: rs.auraRadius,
     auraDamage: rs.auraDamage,
     ownedUpgrades: [...rs.ownedUpgrades],
+    scoreMult: rs.scoreMult ?? 1,
+    thornSkin: rs.thornSkin ?? false,
   };
 }
 
@@ -42,54 +44,20 @@ export function deserializeRunState(data) {
   return rs;
 }
 
-export function serializeMapNode(node) {
-  return {
-    id: node.id,
-    type: node.type,
-    depth: node.depth,
-    visited: node.visited,
-    children: node.children.map(serializeMapNode),
-  };
-}
-
 export function serializeMap(map) {
-  return {
-    root: serializeMapNode(map.root),
-    currentId: map.current.id,
-  };
+  return map.exportState?.() ?? map;
 }
 
 export function deserializeMap(mapSystem, data) {
-  if (!data?.root) {
+  if (!data) {
     mapSystem.reset();
     return;
   }
-
-  function rebuild(nodeData, parent) {
-    const n = {
-      id: nodeData.id,
-      type: nodeData.type,
-      depth: nodeData.depth,
-      visited: nodeData.visited,
-      parent,
-      children: [],
-    };
-    n.children = (nodeData.children ?? []).map((c) => rebuild(c, n));
-    return n;
+  if (data.root) {
+    mapSystem.reset();
+    return;
   }
-
-  mapSystem.root = rebuild(data.root, null);
-  mapSystem.current = findMapNode(mapSystem.root, data.currentId) ?? mapSystem.root;
-  mapSystem.syncIdCounter?.();
-}
-
-function findMapNode(node, id) {
-  if (node.id === id) return node;
-  for (const c of node.children) {
-    const found = findMapNode(c, id);
-    if (found) return found;
-  }
-  return null;
+  mapSystem.loadState(data);
 }
 
 export function serializeEnemy(enemy) {
@@ -102,6 +70,7 @@ export function serializeEnemy(enemy) {
       maxHealth: enemy.maxHealth,
       movementType: enemy.movementType,
       rematch: enemy._rematch ?? false,
+      overlord: enemy.overlord ?? false,
       phase: enemy.phase,
       attackIndex: enemy.attackIndex,
       attackTimer: enemy.attackTimer,
@@ -125,7 +94,9 @@ export function serializeEnemy(enemy) {
 
 export function restoreEnemy(scene, data, healthScale) {
   if (data.kind === "boss") {
-    const boss = new Boss(scene, data.x, data.z, data.movementType, data.rematch);
+    const boss = new Boss(scene, data.x, data.z, data.movementType, data.rematch, {
+      overlord: data.overlord ?? false,
+    });
     boss.health = data.health;
     boss.maxHealth = data.maxHealth;
     boss.phase = data.phase ?? 1;
@@ -170,10 +141,7 @@ export function createRunSnapshot(game) {
       bossIntroTimer: rm.bossIntroTimer,
       isBossRoom: rm.isBossRoom,
       currentRoomType: rm.currentRoomType,
-      roomsSinceBoss: rm.roomsSinceBoss,
-      nextBossIn: rm.nextBossIn,
       bossDefeatsThisRun: rm.bossDefeatsThisRun,
-      pendingBoss: rm.pendingBoss,
       roomScoreMultiplier: rm.roomScoreMultiplier,
       restHealed: rm.restHealed,
       chanceOutcome: rm.chanceOutcome,
