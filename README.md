@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open the URL shown in the terminal (usually http://localhost:5173).
+Open the URL shown in the terminal (usually http://localhost:5175/3dbullethell/ ).
 
 ## Controls
 
