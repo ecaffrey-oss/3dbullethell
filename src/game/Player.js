@@ -8,7 +8,7 @@ import {
   COLORS,
   HARD_MODE_ENEMY_DAMAGE_MULT,
 } from "./constants.js";
-import { getWeapon, getWeaponDrawbacks } from "./Weapons.js";
+import { getWeapon, getWeaponDrawbacks, getNoShootSuppressRadius, resetShootSuppress } from "./Weapons.js";
 import { getSkillBonuses } from "./SkillTree.js";
 import { createRunState } from "./RunUpgrades.js";
 import { applyRelic } from "./Unlockables.js";
@@ -43,6 +43,10 @@ export class Player {
     this.driftAngle = Math.random() * Math.PI * 2;
     this.animTime = 0;
     this.roomShootLock = 0;
+    this.shootSuppressActive = 0;
+    this.shootSuppressCooldown = 0;
+    this.shootSuppressWarn = 0;
+    this.suppressRing = null;
     this.debuffSlow = 0;
     this.debuffBurn = 0;
     this.debuffPoison = 0;
@@ -146,7 +150,7 @@ export class Player {
 
   fireBullet(bulletPool, x, z, dirX, dirZ) {
     const weapon = this.weapon;
-    if (weapon.noShoot) return false;
+    if (weapon.noShoot && !weapon.orbitWeapon) return false;
 
     const rs = this.runState;
     const damage =
@@ -193,6 +197,21 @@ export class Player {
     return weapon.fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts);
   }
 
+  getWeaponFireRate() {
+    const weapon = this.weapon;
+    const drawbacks = this.getDrawbacks();
+    let fireRate =
+      (weapon.fireRate / this.bonuses.fireRateMult / this.runState.fireRateMult) *
+      (drawbacks.fireRateMult ?? 1);
+    fireRate /= this.comboFireRateMult ?? 1;
+    if (weapon.multishot) fireRate *= 2.4;
+    if (this.health <= 2 && this.bonuses.surgeLevels > 0) {
+      fireRate /= 1 + this.bonuses.surgeLevels * 0.12;
+    }
+    if (!Number.isFinite(fireRate) || fireRate <= 0) fireRate = weapon.fireRate;
+    return fireRate;
+  }
+
   syncAuraVisual() {
     const rs = this.runState;
     const auraColor = this.weapon.weaponAura ? 0xff4400 : 0xff6622;
@@ -219,6 +238,46 @@ export class Player {
   onRoomStart() {
     const delay = this.challengeMods?.roomShootDelay ?? 0;
     this.roomShootLock = delay;
+    resetShootSuppress(this);
+  }
+
+  syncSuppressRing() {
+    const weapon = this.weapon;
+    const radius = getNoShootSuppressRadius(weapon);
+    if (!weapon?.noShoot || radius <= 0) {
+      if (this.suppressRing) {
+        this.group.remove(this.suppressRing);
+        this.suppressRing.geometry.dispose();
+        this.suppressRing.material.dispose();
+        this.suppressRing = null;
+      }
+      return;
+    }
+
+    const active = this.shootSuppressActive > 0;
+    const pulse = 0.04 * Math.sin(this.animTime * (active ? 5 : 9));
+    const color = active ? 0x44ddff : 0xff6644;
+    const opacity = active ? 0.18 + pulse : 0.28 + pulse * 1.4;
+
+    if (!this.suppressRing) {
+      this.suppressRing = new THREE.Mesh(
+        new THREE.RingGeometry(radius * 0.92, radius, 48),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity,
+          side: THREE.DoubleSide,
+        })
+      );
+      this.suppressRing.rotation.x = -Math.PI / 2;
+      this.suppressRing.position.y = 0.05;
+      this.group.add(this.suppressRing);
+    } else {
+      this.suppressRing.geometry.dispose();
+      this.suppressRing.geometry = new THREE.RingGeometry(radius * 0.92, radius, 48);
+      this.suppressRing.material.color.setHex(color);
+      this.suppressRing.material.opacity = opacity;
+    }
   }
 
   update(dt, input, camera, canvas, bulletPool) {
@@ -286,15 +345,7 @@ export class Player {
     if (this.weapon.noShoot) return;
     if (this.roomShootLock > 0) return;
 
-    let fireRate =
-      (this.weapon.fireRate / this.bonuses.fireRateMult / this.runState.fireRateMult) *
-      (drawbacks.fireRateMult ?? 1);
-    fireRate /= this.comboFireRateMult ?? 1;
-    if (this.weapon.multishot) fireRate *= 2.4;
-    if (this.health <= 2 && this.bonuses.surgeLevels > 0) {
-      fireRate /= 1 + this.bonuses.surgeLevels * 0.12;
-    }
-    if (!Number.isFinite(fireRate) || fireRate <= 0) fireRate = this.weapon.fireRate;
+    const fireRate = this.getWeaponFireRate();
 
     this.fireCooldown -= dt;
     if (input.isShooting() && this.fireCooldown <= 0 && aim) {

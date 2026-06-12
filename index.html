@@ -7,6 +7,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
     <title>Bullet Hell 3D</title>
+    <meta
+      name="description"
+      content="Play Bullet Hell 3D — a browser roguelike arena shooter. No download required."
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="canonical" href="https://ecaffrey-oss.github.io/3dbullethell/" />
   </head>
   <body>
     <div id="hud">
@@ -25,6 +31,7 @@
           <span id="scale-label" class="hud-chip">HP ×1.0</span>
           <span id="upgrades-label" class="hud-chip hud-upgrades"></span>
           <span id="ability-label" class="hud-chip hud-ability hidden"></span>
+          <span id="suppress-label" class="hud-chip hud-suppress hidden"></span>
         </div>
       </div>
       <div id="message" class="hidden"></div>
@@ -41,6 +48,7 @@
         <div id="combo-bar-fill" class="combo-bar-fill"></div>
       </div>
     </div>
+    <div id="unlock-toast-stack" class="unlock-toast-stack" aria-live="polite"></div>
     <canvas id="game"></canvas>
     <div id="draft-panel" class="hidden"></div>
     <div id="path-panel" class="hidden"></div>
@@ -61,22 +69,48 @@
     <div id="overlay">
       <div class="menu-starfield" aria-hidden="true"></div>
       <button type="button" id="back-to-saves-btn" class="menu-btn menu-btn-secondary hidden">← Saves</button>
-      <div id="save-slots-bar" class="save-slots-bar">
-        <p class="save-slots-heading">Save Files</p>
-        <div id="save-slots"></div>
+      <button type="button" id="audio-tab-btn" class="overlay-corner-tab overlay-corner-tab-left hidden">Audio</button>
+      <div id="audio-panel" class="audio-panel hidden">
+        <p class="audio-panel-title">Audio &amp; FX</p>
+        <div id="audio-settings" class="audio-settings">
+          <label class="volume-row">
+            <span class="volume-label">Music</span>
+            <input type="range" id="music-volume" min="0" max="100" value="22" />
+          </label>
+          <label class="volume-row">
+            <span class="volume-label">SFX</span>
+            <input type="range" id="sfx-volume" min="0" max="100" value="50" />
+          </label>
+          <div class="death-effect-settings">
+            <span class="volume-label death-effect-heading">Death FX</span>
+            <div id="death-effect-picker" class="death-effect-picker"></div>
+            <p class="audio-build-hint">Build Jun 12c · Blue Blur preview on select</p>
+          </div>
+        </div>
       </div>
-      <div id="audio-settings" class="audio-settings">
-        <label class="volume-row">
-          <span class="volume-label">Music</span>
-          <input type="range" id="music-volume" min="0" max="100" value="22" />
+      <button type="button" id="leaderboard-tab-btn" class="overlay-corner-tab">Leaderboard</button>
+      <div id="leaderboard-panel" class="leaderboard-panel hidden">
+        <p class="leaderboard-panel-title">Global Leaderboard</p>
+        <label class="leaderboard-name-row">
+          <span class="leaderboard-name-label">Display name</span>
+          <input id="leaderboard-name" type="text" maxlength="16" placeholder="Anonymous" />
         </label>
-        <label class="volume-row">
-          <span class="volume-label">SFX</span>
-          <input type="range" id="sfx-volume" min="0" max="100" value="50" />
-        </label>
-        <div class="death-effect-settings">
-          <span class="volume-label death-effect-heading">Death FX</span>
-          <div id="death-effect-picker" class="death-effect-picker"></div>
+        <div class="leaderboard-columns">
+          <div class="leaderboard-column">
+            <h3 class="leaderboard-heading">Top Bank Scores</h3>
+            <ol id="leaderboard-scores" class="leaderboard-list"></ol>
+          </div>
+          <div class="leaderboard-column">
+            <h3 class="leaderboard-heading">Deepest Runs</h3>
+            <ol id="leaderboard-floors" class="leaderboard-list"></ol>
+          </div>
+        </div>
+        <p id="leaderboard-status" class="leaderboard-status"></p>
+      </div>
+      <div id="menu-top-bar" class="menu-top-bar">
+        <div id="save-slots-bar" class="save-slots-bar">
+          <p class="save-slots-heading">Save Files</p>
+          <div id="save-slots"></div>
         </div>
       </div>
       <div id="overlay-content" class="menu-shell menu-shell-title menu-repel">
@@ -97,6 +131,7 @@
               <button type="button" id="achievements-tab-btn" class="menu-tab-btn">Achievements</button>
               <button type="button" id="challenges-tab-btn" class="menu-tab-btn">Challenges</button>
               <button type="button" id="items-tab-btn" class="menu-tab-btn">Items</button>
+              <button type="button" id="abilities-tab-btn" class="menu-tab-btn">Abilities</button>
               </div>
             </div>
             <div id="skill-tree-panel" class="hidden">
@@ -114,17 +149,30 @@
             <div id="items-panel" class="menu-sub-panel hidden">
               <div id="items-list"></div>
             </div>
-            <div id="abilities-section" class="abilities-section">
-              <button type="button" id="abilities-tab-btn" class="menu-tab-btn abilities-tab-btn">Abilities</button>
-              <div id="abilities-panel" class="menu-sub-panel abilities-panel hidden">
-                <div id="abilities-list"></div>
-              </div>
+            <div id="abilities-panel" class="menu-sub-panel hidden">
+              <div id="abilities-list"></div>
             </div>
           </div>
           <p id="continue-run-hint" class="bank-score hidden"></p>
           <div class="profile-actions">
             <button type="button" id="continue-run-btn" class="menu-start-btn hidden">▶ Continue Run</button>
             <button id="start-btn" type="button" class="menu-start-btn">▶ Start Game</button>
+            <button type="button" id="reset-progress-btn" class="menu-btn menu-btn-reset">Reset Save Progress</button>
+          </div>
+        </div>
+      </div>
+      <div id="reset-confirm-dialog" class="reset-confirm-dialog hidden" role="alertdialog" aria-modal="true" aria-labelledby="reset-confirm-title">
+        <div class="reset-confirm-card">
+          <h2 id="reset-confirm-title">Reset Save?</h2>
+          <p>
+            This will permanently erase all progress on
+            <strong id="reset-confirm-slot-label">Save 1</strong>:
+            bank score, skills, achievements, challenges, unlocks, loadout, and any suspended run.
+          </p>
+          <p class="reset-confirm-warning">This cannot be undone.</p>
+          <div class="reset-confirm-actions">
+            <button type="button" id="reset-confirm-cancel" class="menu-btn menu-btn-secondary">Cancel</button>
+            <button type="button" id="reset-confirm-accept" class="menu-btn menu-btn-danger">Yes, Reset Progress</button>
           </div>
         </div>
       </div>

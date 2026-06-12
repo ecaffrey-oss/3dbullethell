@@ -172,7 +172,7 @@ export function createRunSnapshot(game) {
       debuffWeak: player.debuffWeak,
     },
     enemies: rm.enemies.filter((e) => e.alive).map(serializeEnemy),
-    resumeUi: snapshotResumeUi(snapshot.room.state, rm.currentRoomType),
+    resumeUi: snapshotResumeUi(rm.state, rm.currentRoomType),
   };
 }
 
@@ -211,7 +211,9 @@ export function restoreRunSnapshot(game, snapshot) {
   }
 
   for (const ed of snapshot.enemies ?? []) {
-    rm.enemies.push(restoreEnemy(game.scene, ed, rm.healthScale));
+    const enemy = restoreEnemy(game.scene, ed, rm.healthScale);
+    rm._attachEnemyDeathCallbacks(enemy);
+    rm.enemies.push(enemy);
   }
 
   player.applyMeta(game.meta);

@@ -11,6 +11,7 @@ export class CompanionSystem {
     this.petMeshes = [];
     this.shields = [];
     this.mines = [];
+    this.orbitWeapon = null;
   }
 
   sync(runState, player) {
@@ -21,9 +22,50 @@ export class CompanionSystem {
 
   clear() {
     this._clearMines();
+    this._clearOrbitWeapon();
     while (this.group.children.length) this.group.remove(this.group.children[0]);
     this.petMeshes = [];
     this.shields = [];
+  }
+
+  _clearOrbitWeapon() {
+    if (!this.orbitWeapon?.mesh) {
+      this.orbitWeapon = null;
+      return;
+    }
+    const mesh = this.orbitWeapon.mesh;
+    if (mesh.parent) mesh.parent.remove(mesh);
+    mesh.traverse((child) => {
+      child.geometry?.dispose();
+      child.material?.dispose();
+    });
+    this.orbitWeapon = null;
+  }
+
+  _createChairMesh() {
+    const group = new THREE.Group();
+    const seat = new THREE.Mesh(
+      new THREE.BoxGeometry(0.7, 0.15, 0.7),
+      new THREE.MeshBasicMaterial({ color: 0x886644 })
+    );
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(0.65, 0.55, 0.12),
+      new THREE.MeshBasicMaterial({ color: 0x664422 })
+    );
+    back.position.set(0, 0.35, -0.32);
+    group.add(seat);
+    group.add(back);
+    return group;
+  }
+
+  _rebuildOrbitWeapon() {
+    this._clearOrbitWeapon();
+    const weapon = this.player?.weapon;
+    if (!weapon?.orbitWeapon) return;
+
+    const mesh = this._createChairMesh();
+    this.group.add(mesh);
+    this.orbitWeapon = { mesh, angle: 0, fireTimer: 0 };
   }
 
   _clearMines() {
@@ -49,6 +91,7 @@ export class CompanionSystem {
 
   rebuildVisuals() {
     this._clearMines();
+    this._clearOrbitWeapon();
     while (this.group.children.length) this.group.remove(this.group.children[0]);
     this.shields = [];
     this.petMeshes = [];
@@ -146,6 +189,8 @@ export class CompanionSystem {
 
       this.petMeshes.push(base);
     }
+
+    this._rebuildOrbitWeapon();
   }
 
   _spawnMine(x, z) {
@@ -207,6 +252,7 @@ export class CompanionSystem {
     }
 
     this._updateMines(dt, enemies, onEnemyKilled);
+    this._updateOrbitWeapon(dt, player, bulletPool, enemies);
 
     for (const pet of this.petMeshes) {
       pet.hitCooldown = Math.max(0, (pet.hitCooldown ?? 0) - dt);
@@ -266,6 +312,45 @@ export class CompanionSystem {
           pet.healTimer = 8;
         }
       }
+    }
+  }
+
+  _updateOrbitWeapon(dt, player, bulletPool, enemies) {
+    if (!this.orbitWeapon) return;
+    const weapon = player.weapon;
+    if (!weapon?.orbitWeapon) return;
+
+    const ow = this.orbitWeapon;
+    ow.angle += dt * (weapon.orbitSpeed ?? 2.4);
+    const r = weapon.orbitRadius ?? 1.55;
+    const ox = player.x + Math.cos(ow.angle) * r;
+    const oz = player.z + Math.sin(ow.angle) * r;
+    ow.mesh.position.set(ox, 0.75, oz);
+    ow.mesh.rotation.y += dt * 3.5;
+
+    if (player.roomShootLock > 0) return;
+
+    ow.fireTimer -= dt;
+    if (ow.fireTimer > 0) return;
+
+    const range = weapon.orbitAimRange ?? 20;
+    let nearest = null;
+    let best = range;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const d = Math.hypot(e.x - player.x, e.z - player.z);
+      if (d < best) {
+        best = d;
+        nearest = e;
+      }
+    }
+    if (!nearest) return;
+
+    const dx = nearest.x - ox;
+    const dz = nearest.z - oz;
+    const len = Math.hypot(dx, dz) || 1;
+    if (player.fireBullet(bulletPool, ox, oz, dx / len, dz / len)) {
+      ow.fireTimer = player.getWeaponFireRate();
     }
   }
 

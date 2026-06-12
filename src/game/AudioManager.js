@@ -3,10 +3,13 @@ const soundUrl = (file) => `${import.meta.env.BASE_URL}sounds/${file}`;
 const MUSIC_URL = soundUrl("music.mp3");
 const EXPLOSION_URL = soundUrl("deltarune-explosion.mp3");
 const ELEPHANT_URL = soundUrl("elephant-charge.mp3");
+const ATRAIN_URL = soundUrl("a-train-zoom.mp3");
+const ATRAIN_FALLBACK_URL = soundUrl("a-train-sound.mp3");
+const ATRAIN_URLS = [ATRAIN_URL, ATRAIN_FALLBACK_URL];
 const MUSIC_BASE_GAIN = 0.14;
 const SFX_BASE_GAIN = 0.42;
 
-export const DEATH_EFFECT_IDS = ["basic", "squish", "explosion", "elephant"];
+export const DEATH_EFFECT_IDS = ["basic", "squish", "explosion", "elephant", "atrains"];
 
 export class AudioManager {
   constructor() {
@@ -16,10 +19,13 @@ export class AudioManager {
     this.squishBuffer = null;
     this.explosionBuffer = null;
     this.elephantBuffer = null;
+    this.atrainBuffer = null;
+    this.atrainElement = null;
     this.musicBuffer = null;
     this.squishLoad = null;
     this.explosionLoad = null;
     this.elephantLoad = null;
+    this.atrainLoad = null;
     this.musicLoad = null;
     this.musicSource = null;
     this.musicPlaying = false;
@@ -38,7 +44,12 @@ export class AudioManager {
       if (!raw) return { music: 0.22, sfx: 0.5, deathEffect: "basic" };
       const parsed = JSON.parse(raw);
       const effect = parsed.deathEffect ?? "basic";
-      const migrated = effect === "puddle" ? "squish" : effect;
+      const migrated =
+        effect === "puddle"
+          ? "squish"
+          : effect === "a-train" || effect === "a_train" || effect === "blueblur" || effect === "blue-blur"
+            ? "atrains"
+            : effect;
       return {
         music: this._clamp01(parsed.music ?? 0.22),
         sfx: this._clamp01(parsed.sfx ?? 0.5),
@@ -99,6 +110,7 @@ export class AudioManager {
       this._resumeContext();
       return;
     }
+    this._primeATrainElement();
     this.ctx = new AudioContext();
     this.musicGain = this.ctx.createGain();
     this.musicGain.connect(this.ctx.destination);
@@ -110,8 +122,70 @@ export class AudioManager {
     this.squishLoad = this._loadSquish();
     this.explosionLoad = this._loadExplosion();
     this.elephantLoad = this._loadElephant();
+    this.atrainLoad = this._loadATrain();
     this.musicLoad = this._loadMusic();
     this._resumeContext();
+  }
+
+  _primeATrainElement() {
+    if (this.atrainElement) return;
+    const el = new Audio(ATRAIN_URLS[0]);
+    el.preload = "auto";
+    el.load();
+    this.atrainElement = el;
+  }
+
+  preloadDeathSfx() {
+    if (!this.unlocked) return Promise.resolve();
+    return Promise.all([
+      this.squishLoad,
+      this.explosionLoad,
+      this.elephantLoad,
+      this.atrainLoad,
+    ]);
+  }
+
+  async _ensureContextRunning() {
+    if (!this.ctx) return false;
+    if (this.ctx.state === "suspended") {
+      try {
+        await this.ctx.resume();
+      } catch {
+        return false;
+      }
+    }
+    return this.ctx.state === "running";
+  }
+
+  _htmlSfxVolume(gain) {
+    return Math.min(1, gain * this.sfxVolume * SFX_BASE_GAIN);
+  }
+
+  _playHtmlSfx(url, { gain = 0.55, playbackRate = 1 } = {}) {
+    try {
+      const el = new Audio(url);
+      el.volume = this._htmlSfxVolume(gain);
+      el.playbackRate = playbackRate;
+      void el.play();
+    } catch {
+      /* optional */
+    }
+  }
+
+  async playDeathSound(effect, { large = false, pitchMult = 1 } = {}) {
+    if (!this.unlocked) return;
+    await this._ensureContextRunning();
+    if (effect === "basic") {
+      this.playBasicDeath(large);
+    } else if (effect === "squish") {
+      await this.playSquish(large, pitchMult);
+    } else if (effect === "explosion") {
+      await this.playExplosion(large);
+    } else if (effect === "elephant") {
+      await this.playElephant();
+    } else if (effect === "atrains") {
+      await this.playATrain(large);
+    }
   }
 
   playMenu() {
@@ -209,8 +283,42 @@ export class AudioManager {
     }
   }
 
+  async _loadATrain() {
+    if (!this.ctx) return;
+    for (const url of ATRAIN_URLS) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const data = await res.arrayBuffer();
+        const buffer = await this.ctx.decodeAudioData(data.slice(0));
+        if (buffer.duration > 0.05) {
+          this.atrainBuffer = buffer;
+          return;
+        }
+      } catch {
+        /* try next source */
+      }
+    }
+    this.atrainBuffer = null;
+  }
+
+  _playBuffer(buffer, { gain = 0.55, playbackRate = 1 } = {}) {
+    if (!this.unlocked || !this.ctx || !this.sfx || !buffer) return false;
+    this._resumeContext();
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.value = playbackRate;
+    const gainNode = this.ctx.createGain();
+    gainNode.gain.value = gain;
+    src.connect(gainNode);
+    gainNode.connect(this.sfx);
+    src.start(0);
+    return true;
+  }
+
   playBasicDeath(large = false) {
     if (!this.unlocked || !this.ctx || !this.sfx) return;
+    this._resumeContext();
     const t0 = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -226,55 +334,82 @@ export class AudioManager {
   }
 
   async playElephant() {
-    if (!this.unlocked || !this.ctx || !this.sfx) return;
+    if (!this.unlocked) return;
+    await this._ensureContextRunning();
     if (this.elephantLoad) await this.elephantLoad;
-    if (!this.elephantBuffer) return;
-
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.elephantBuffer;
-    src.playbackRate.value = 1;
-
-    const gain = this.ctx.createGain();
-    gain.gain.value = 0.58;
-
-    src.connect(gain);
-    gain.connect(this.sfx);
-    src.start();
+    const gain = 0.58;
+    if (this.ctx && this.sfx && this.elephantBuffer && this._playBuffer(this.elephantBuffer, { gain })) {
+      return;
+    }
+    this._playHtmlSfx(ELEPHANT_URL, { gain });
   }
 
   async playExplosion(large = false) {
-    if (!this.unlocked || !this.ctx || !this.sfx) return;
+    if (!this.unlocked) return;
+    await this._ensureContextRunning();
     if (this.explosionLoad) await this.explosionLoad;
-    if (!this.explosionBuffer) return;
-
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.explosionBuffer;
-    src.playbackRate.value = large ? 0.92 : 1 + (Math.random() - 0.5) * 0.06;
-
-    const gain = this.ctx.createGain();
-    gain.gain.value = large ? 0.62 : 0.5;
-
-    src.connect(gain);
-    gain.connect(this.sfx);
-    src.start();
+    const gain = large ? 0.62 : 0.5;
+    const playbackRate = large ? 0.92 : 1 + (Math.random() - 0.5) * 0.06;
+    if (
+      this.ctx &&
+      this.sfx &&
+      this.explosionBuffer &&
+      this._playBuffer(this.explosionBuffer, { gain, playbackRate })
+    ) {
+      return;
+    }
+    this._playHtmlSfx(EXPLOSION_URL, { gain, playbackRate });
   }
 
   async playSquish(large = false, pitchMult = 1) {
-    if (!this.unlocked || !this.ctx || !this.sfx) return;
+    if (!this.unlocked) return;
+    await this._ensureContextRunning();
     if (this.squishLoad) await this.squishLoad;
-    if (!this.squishBuffer) return;
-
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.squishBuffer;
+    const gain = large ? 0.55 : 0.42;
     const base = large ? 0.88 : 1 + (Math.random() - 0.5) * 0.08;
-    src.playbackRate.value = base * pitchMult;
+    const playbackRate = base * pitchMult;
+    if (this.ctx && this.sfx && this.squishBuffer && this._playBuffer(this.squishBuffer, { gain, playbackRate })) {
+      return;
+    }
+    this._playHtmlSfx(soundUrl("squish.mp3"), { gain, playbackRate });
+  }
 
-    const gain = this.ctx.createGain();
-    gain.gain.value = large ? 0.55 : 0.42;
+  async playATrain(large = false) {
+    if (!this.unlocked) return;
+    await this._ensureContextRunning();
+    const gain = large ? 0.92 : 0.85;
+    const playbackRate = large ? 0.96 : 1.02;
+    const playedHtml = await this._playATrainHtml(gain, playbackRate);
+    if (playedHtml) return;
+    if (this.atrainLoad) await this.atrainLoad;
+    if (this.ctx && this.sfx && this.atrainBuffer) {
+      this._playBuffer(this.atrainBuffer, { gain, playbackRate });
+    }
+  }
 
-    src.connect(gain);
-    gain.connect(this.sfx);
-    src.start();
+  async previewDeathEffect(effect) {
+    if (effect === "atrains") {
+      if (!this.unlocked) this.unlock();
+      await this.playATrain(false);
+      return;
+    }
+    if (!this.unlocked) this.unlock();
+    await this.playDeathSound(effect, { large: false, pitchMult: 1 });
+  }
+
+  async _playATrainHtml(gain, playbackRate) {
+    for (const url of ATRAIN_URLS) {
+      try {
+        const el = new Audio(url);
+        el.volume = this._htmlSfxVolume(gain);
+        el.playbackRate = playbackRate;
+        await el.play();
+        return true;
+      } catch {
+        /* try next clip */
+      }
+    }
+    return false;
   }
 
   _applyMusicGain() {
@@ -286,6 +421,10 @@ export class AudioManager {
   _applySfxGain() {
     if (!this.sfx) return;
     this.sfx.gain.value = this.sfxVolume * SFX_BASE_GAIN;
+  }
+
+  ensureActive() {
+    this._resumeContext();
   }
 
   _resumeContext() {

@@ -4,11 +4,23 @@ A top-down 3D bullet hell roguelike built with Three.js and Vite.
 
 ## Play (no install)
 
-**Just open this link in a browser — no download, no npm, no code required:**
+**Just open this link in any browser — no download, no npm, no Cursor, no localhost:**
 
 **👉 [https://ecaffrey-oss.github.io/3dbullethell/](https://ecaffrey-oss.github.io/3dbullethell/)**
 
+Bookmark that URL on your phone, tablet, or any computer. The game runs entirely in the browser; progress saves in that browser’s local storage.
+
 Works in Chrome, Firefox, or Safari. Keyboard + mouse recommended.
+
+### Updating the live game (no local build needed)
+
+1. Push your changes to the `main` branch on GitHub.
+2. GitHub Actions builds and publishes automatically (see `.github/workflows/deploy-pages.yml`).
+3. Wait ~1 minute, then refresh the play link above.
+
+You can also trigger a deploy manually: **GitHub repo → Actions → “Deploy to GitHub Pages” → Run workflow**.
+
+Local `npm run dev` is only for development — **players never need it.**
 
 ## Controls
 

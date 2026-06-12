@@ -40,19 +40,83 @@ export function getWeaponDrawbacks(weaponId) {
 
 /** Medium-range bubble: nearby enemies cannot fire while player uses a no-shoot weapon. */
 export const NO_SHOOT_SUPPRESS_RADIUS = 6.5;
+export const SHOOT_SUPPRESS_DURATION = 5;
+export const SHOOT_SUPPRESS_RECHARGE = 3;
 
 export function getNoShootSuppressRadius(weapon) {
   if (!weapon?.noShoot) return 0;
   return weapon.shootSuppressRadius ?? weapon.weaponAura?.radius ?? NO_SHOOT_SUPPRESS_RADIUS;
 }
 
+export function resetShootSuppress(player) {
+  if (!player) return;
+  player.shootSuppressActive = 0;
+  player.shootSuppressCooldown = 0;
+  player.shootSuppressWarn = 0;
+}
+
+export function updateShootSuppress(player, dt, enemies) {
+  const weapon = player?.weapon;
+  if (!weapon?.noShoot) {
+    resetShootSuppress(player);
+    return;
+  }
+
+  const radius = getNoShootSuppressRadius(weapon);
+  const hasNearby = enemies?.some(
+    (e) => e.alive && Math.hypot(e.x - player.x, e.z - player.z) <= radius
+  );
+
+  if (player.shootSuppressWarn > 0) player.shootSuppressWarn -= dt;
+
+  if (player.shootSuppressActive > 0) {
+    player.shootSuppressActive -= dt;
+    if (player.shootSuppressActive <= 0) {
+      player.shootSuppressActive = 0;
+      player.shootSuppressCooldown = SHOOT_SUPPRESS_RECHARGE;
+      player.shootSuppressWarn = 2.5;
+    }
+    return;
+  }
+
+  if (player.shootSuppressCooldown > 0) {
+    player.shootSuppressCooldown -= dt;
+    return;
+  }
+
+  if (hasNearby) {
+    player.shootSuppressActive = SHOOT_SUPPRESS_DURATION;
+  }
+}
+
 export function isEnemyShootSuppressed(player, enemy) {
-  if (!player?.weapon?.noShoot) return false;
+  if (!enemy) return false;
   return isWithinNoShootSuppress(player, enemy.x, enemy.z);
+}
+
+export function getShootSuppressHud(player) {
+  if (!player?.weapon?.noShoot) return null;
+  if ((player.shootSuppressActive ?? 0) > 0) {
+    return {
+      text: `Silence ${player.shootSuppressActive.toFixed(1)}s`,
+      mode: "active",
+    };
+  }
+  if ((player.shootSuppressCooldown ?? 0) > 0) {
+    return {
+      text: `Enemies firing! ${player.shootSuppressCooldown.toFixed(1)}s`,
+      mode: "warn",
+    };
+  }
+  if ((player.shootSuppressWarn ?? 0) > 0) {
+    return { text: "Enemies firing!", mode: "warn" };
+  }
+  return null;
 }
 
 export function isWithinNoShootSuppress(player, x, z) {
   if (!player?.weapon?.noShoot) return false;
+  if ((player.shootSuppressActive ?? 0) <= 0) return false;
   const r = getNoShootSuppressRadius(player.weapon);
   return Math.hypot(x - player.x, z - player.z) <= r;
 }
@@ -470,10 +534,33 @@ export const WEAPONS = {
       });
     },
   },
+  chair_buddy: {
+    id: "chair_buddy",
+    name: "Chair Buddy",
+    description: "Orbiting chair shoots for you · 5s silence / 3s recharge",
+    unlock: "unlockable",
+    unlockId: "chair_buddy",
+    fireRate: 0.32,
+    damage: 1,
+    speed: 26,
+    noShoot: true,
+    orbitWeapon: true,
+    orbitRadius: 1.55,
+    orbitSpeed: 2.4,
+    orbitAimRange: 20,
+    shootSuppressRadius: 8.5,
+    drawbacks: { speedMult: 0.95 },
+    fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts) {
+      return bulletPool.spawnPlayerBullet(x, z, dirX, dirZ, speed, damage, {
+        ...opts,
+        color: 0xaa7744,
+      });
+    },
+  },
   bulldozer: {
     id: "bulldozer",
     name: "Bulldozer",
-    description: "Ram enemies — no shooting · nearby foes can't fire",
+    description: "Ram enemies — 5s silence bubble / 3s recharge",
     unlock: "floor",
     unlockFloor: 10,
     fireRate: 999,
@@ -491,7 +578,7 @@ export const WEAPONS = {
   sunspot: {
     id: "sunspot",
     name: "Sunspot",
-    description: "Giant burn aura — cannot shoot · body contact harmless",
+    description: "Giant burn aura — 5s silence bubble / 3s recharge",
     unlock: "floor",
     unlockFloor: 20,
     fireRate: 999,

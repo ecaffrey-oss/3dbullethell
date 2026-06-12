@@ -1,0 +1,7 @@
+{
+  "entries": [
+    { "name": "Deep Diver", "bankScore": 42000, "maxFloors": 22 },
+    { "name": "Bullet Sage", "bankScore": 28500, "maxFloors": 18 },
+    { "name": "Floor Climber", "bankScore": 12000, "maxFloors": 25 }
+  ]
+}

@@ -71,9 +71,14 @@ export class RoomManager {
   _spawnEnemy(type, x, z, scale) {
     const finalType = maybeRollChairType(type);
     const enemy = new Enemy(this.scene, finalType, x, z, scale);
+    this._attachEnemyDeathCallbacks(enemy);
+    this.enemies.push(enemy);
+  }
+
+  _attachEnemyDeathCallbacks(enemy) {
+    if (!enemy) return;
     enemy.onDeathSound = this.onEnemyDeathSound;
     enemy.onDeathVisual = this.onEnemyDeathVisual;
-    this.enemies.push(enemy);
   }
 
   reset() {
@@ -210,8 +215,7 @@ export class RoomManager {
         overlord: isOverlord,
         onSpawnMinion: isOverlord ? () => this._spawnOverlordMinions() : null,
       });
-      boss.onDeathSound = this.onEnemyDeathSound;
-      boss.onDeathVisual = this.onEnemyDeathVisual;
+      this._attachEnemyDeathCallbacks(boss);
       this.enemies.push(boss);
       this.bossIntroTimer = isOverlord ? 3.2 : 2.5;
       this._buildArenaHazards(isOverlord ? 1.45 : 1.2);
@@ -224,8 +228,7 @@ export class RoomManager {
       }
       const elitePt = this.arena.randomEnemyPoint();
       const elite = new Enemy(this.scene, "elite", elitePt.x, elitePt.z, this.healthScale * 1.3);
-      elite.onDeathSound = this.onEnemyDeathSound;
-      elite.onDeathVisual = this.onEnemyDeathVisual;
+      this._attachEnemyDeathCallbacks(elite);
       this.enemies.push(elite);
       this._buildArenaHazards(1);
     } else if (type === PATH_TYPES.HARD) {

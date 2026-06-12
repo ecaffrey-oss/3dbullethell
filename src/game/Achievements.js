@@ -47,7 +47,7 @@ export const ACHIEVEMENTS = [
     id: "chair_hunter",
     name: "Furniture Duty",
     desc: "Destroy the legendary chair foe",
-    reward: "relic_chair",
+    reward: "chair_buddy",
     check: (ctx) => ctx.lifetimeChairKills >= 1,
   },
   {

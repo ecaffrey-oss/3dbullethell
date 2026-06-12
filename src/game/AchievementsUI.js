@@ -14,7 +14,10 @@ export class AchievementsUI {
   bindTab() {
     this.tabBtn = document.getElementById("achievements-tab-btn");
     if (!this.tabBtn) return;
-    this.tabBtn.addEventListener("click", () => this.setOpen(!this.open));
+    this.tabBtn.addEventListener("click", () => {
+      if (this.handleTabClick) this.handleTabClick();
+      else this.setOpen(!this.open);
+    });
   }
 
   setOpen(open) {

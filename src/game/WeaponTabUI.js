@@ -1,4 +1,5 @@
 import { getAllWeapons, getWeaponUnlockLabel, isWeaponUnlocked } from "./Weapons.js";
+import { getUnlockable, getUnlockSourceLabel } from "./Unlockables.js";
 
 export class WeaponTabUI {
   constructor(meta, panelEl, container, onUpdate) {
@@ -13,7 +14,10 @@ export class WeaponTabUI {
   bindTab() {
     this.tabBtn = document.getElementById("weapons-tab-btn");
     if (!this.tabBtn) return;
-    this.tabBtn.addEventListener("click", () => this.setOpen(!this.open));
+    this.tabBtn.addEventListener("click", () => {
+      if (this.handleTabClick) this.handleTabClick();
+      else this.setOpen(!this.open);
+    });
   }
 
   setOpen(open) {
@@ -29,7 +33,7 @@ export class WeaponTabUI {
 
     const hint = document.createElement("p");
     hint.className = "bank-score";
-    hint.textContent = "Unlock via skill tree licenses, achievements, or floor depth · Shift+1–9 in run";
+    hint.textContent = "Skill tree licenses, floor/score unlocks, and achievement weapons · Shift+1–9 in run";
     this.container.appendChild(hint);
 
     const grid = document.createElement("div");
@@ -45,11 +49,11 @@ export class WeaponTabUI {
         (this.meta.selectedWeapon === w.id ? " selected" : "") +
         (!unlocked ? " locked" : "");
       btn.disabled = !unlocked;
-      const req = getWeaponUnlockLabel(w);
+      const req = unlocked ? getWeaponUnlockLabel(w) : this.getLockedLabel(w);
       btn.innerHTML = `
         <span class="skill-name">${w.name}</span>
         <span class="skill-desc">${w.description}</span>
-        <span class="skill-cost">${unlocked ? req : `🔒 ${req}`}</span>
+        <span class="skill-cost">${req}</span>
       `;
       btn.addEventListener("click", () => {
         if (!unlocked) return;
@@ -61,5 +65,13 @@ export class WeaponTabUI {
     }
 
     this.container.appendChild(grid);
+  }
+
+  getLockedLabel(weapon) {
+    if (weapon.unlock === "unlockable" && weapon.unlockId) {
+      const item = getUnlockable(weapon.unlockId);
+      if (item) return `🔒 ${getUnlockSourceLabel(item)}`;
+    }
+    return `🔒 ${getWeaponUnlockLabel(weapon)}`;
   }
 }

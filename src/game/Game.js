@@ -5,9 +5,10 @@ import { BulletPool } from "./BulletPool.js";
 import { RoomManager } from "./RoomManager.js";
 import { Arena } from "./Arena.js";
 import { SaveManager, SLOT_COUNT } from "./SaveManager.js";
+import { AudioManager } from "./AudioManager.js";
 import { SkillTreeUI } from "./SkillTree.js";
 import { WeaponTabUI } from "./WeaponTabUI.js";
-import { getAvailableWeapons, getWeapon } from "./Weapons.js";
+import { getAvailableWeapons, getWeapon, getShootSuppressHud, resetShootSuppress, updateShootSuppress } from "./Weapons.js";
 import { RunUpgradeUI } from "./RunUpgradeUI.js";
 import { getRunUpgradeSummary, applyUpgrade, pickUpgradeChoices } from "./RunUpgrades.js";
 import { CompanionSystem } from "./CompanionSystem.js";
@@ -24,11 +25,15 @@ import { createRunAchievementState, evaluateAchievements } from "./Achievements.
 import { AchievementsUI } from "./AchievementsUI.js";
 import { ChallengesUI } from "./ChallengesUI.js";
 import { UnlockItemsUI } from "./UnlockItemsUI.js";
+import { UnlockToastUI } from "./UnlockToastUI.js";
+import { getUnlockable } from "./Unlockables.js";
 import { AbilitiesUI } from "./AbilitiesUI.js";
 import { AbilitySystem } from "./AbilitySystem.js";
 import { isAbilityUnlocked, getAbility } from "./Abilities.js";
-import { AudioManager } from "./AudioManager.js";
-import { DeathEffects, DEATH_EFFECT_OPTIONS } from "./DeathEffects.js";
+import { LeaderboardService } from "./LeaderboardService.js";
+import { LeaderboardUI } from "./LeaderboardUI.js";
+import { AudioTabUI } from "./AudioTabUI.js";
+import { DeathEffects } from "./DeathEffects.js";
 import { DebrisSystem } from "./DebrisSystem.js";
 import { ComboSystem } from "./ComboSystem.js";
 import { createRunSnapshot, restoreRunSnapshot } from "./RunSnapshot.js";
@@ -61,6 +66,7 @@ export class Game {
     this.hardModeActive = false;
     this._musicTrack = null;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.sortObjects = true;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -91,17 +97,11 @@ export class Game {
     this.roomManager.arenaHazards = this.arenaHazards;
     this.roomManager.onEnemyDeathSound = (entity) => {
       this.combo.onKill();
-      const large = entity?.type === "boss" || entity?.type === "elite";
-      const effect = this.audio.getDeathEffect();
-      if (effect === "basic") {
-        this.audio.playBasicDeath(large);
-      } else if (effect === "squish") {
-        this.audio.playSquish(large, this.combo.squishPitch);
-      } else if (effect === "explosion") {
-        this.audio.playExplosion(large);
-      } else if (effect === "elephant") {
-        this.audio.playElephant();
-      }
+      const large = entity?.type === "boss" || entity?.type === "elite" || entity?.isElite;
+      void this.audio.playDeathSound(this.audio.getDeathEffect(), {
+        large,
+        pitchMult: this.combo.squishPitch,
+      });
     };
     this.roomManager.onEnemyDeathVisual = (entity) => {
       const effect = this.audio.getDeathEffect();
@@ -112,6 +112,8 @@ export class Game {
         this.deathEffects.spawnExplosion(entity);
       } else if (effect === "elephant") {
         this.deathEffects.spawnElephant(entity, this.camera);
+      } else if (effect === "atrains") {
+        this.deathEffects.spawnATrain(entity, this.camera);
       }
     };
 
@@ -224,6 +226,28 @@ export class Game {
       ui.abilitiesContainer,
       () => this.refreshMenu()
     );
+    this.unlockToastUI = new UnlockToastUI(ui.unlockToastStack);
+    this.leaderboard = new LeaderboardService();
+    this.leaderboardUI = new LeaderboardUI(
+      this.leaderboard,
+      ui.leaderboardTabBtn,
+      ui.leaderboardPanel,
+      ui.leaderboardNameInput,
+      ui.leaderboardScores,
+      ui.leaderboardFloors,
+      ui.leaderboardStatus,
+      () => this.meta
+    );
+    this.audioUI = new AudioTabUI(
+      ui.audioTabBtn,
+      ui.audioPanel,
+      ui.deathEffectPicker,
+      this.audio,
+      () => this.unlockAudio()
+    );
+    this.bindMenuTabs();
+    this.bindLeaderboardTab();
+    this.bindAudioTab();
     this.shopRareUpgrade = null;
     this.runUpgradeUI = new RunUpgradeUI(ui.draftPanel, () => {
       this.companions.sync(this.player.runState, this.player);
@@ -235,8 +259,8 @@ export class Game {
     this.bindRunButtons();
     this.bindSaveSlots();
     this.bindBackToSaves();
+    this.bindResetProgress();
     this.bindAudioSliders();
-    this.bindDeathEffectPicker();
     this.bindPause();
     window.addEventListener("resize", () => this.onResize());
     window.addEventListener("pagehide", () => {
@@ -251,8 +275,87 @@ export class Game {
     this.startIdleRender();
   }
 
+  bindLeaderboardTab() {
+    this.leaderboardUI.handleTabClick = () => {
+      if (this.leaderboardUI.open) {
+        this.leaderboardUI.setOpen(false);
+        return;
+      }
+      this.closeAllMenuTabs();
+      this.leaderboardUI.setOpen(true);
+    };
+  }
+
+  bindAudioTab() {
+    this.audioUI.handleTabClick = () => {
+      if (this.audioUI.open) {
+        this.audioUI.setOpen(false);
+        return;
+      }
+      this.closeAllMenuTabs({ keepAudio: true });
+      this.audioUI.setOpen(true);
+    };
+  }
+
+  bindMenuTabs() {
+    const tabs = [
+      ["skills", this.skillTreeUI],
+      ["weapons", this.weaponTabUI],
+      ["achievements", this.achievementsUI],
+      ["challenges", this.challengesUI],
+      ["items", this.unlockItemsUI],
+      ["abilities", this.abilitiesUI],
+    ];
+    for (const [id, ui] of tabs) {
+      ui.handleTabClick = () => {
+        if (ui.open) this.closeAllMenuTabs();
+        else this.openMenuTab(id);
+      };
+    }
+  }
+
+  submitLeaderboardRun() {
+    this.leaderboard.submitRun({
+      name: this.leaderboard.getPlayerName(),
+      bankScore: this.meta.bankScore,
+      maxFloors: this.meta.maxFloorsCleared,
+    });
+    this.leaderboardUI?.render(this.meta);
+  }
+
   bindBackToSaves() {
-    this.ui.backToSavesBtn?.addEventListener("click", () => this.showSaveSelectView());
+    this.ui.backToSavesBtn?.addEventListener("click", () => {
+      this.hideResetConfirm();
+      this.showSaveSelectView();
+    });
+  }
+
+  bindResetProgress() {
+    this.ui.resetProgressBtn?.addEventListener("click", () => this.showResetConfirm());
+    this.ui.resetConfirmCancel?.addEventListener("click", () => this.hideResetConfirm());
+    this.ui.resetConfirmAccept?.addEventListener("click", () => this.confirmResetProgress());
+    this.ui.resetConfirmDialog?.addEventListener("click", (e) => {
+      if (e.target === this.ui.resetConfirmDialog) this.hideResetConfirm();
+    });
+  }
+
+  showResetConfirm() {
+    const slot = this.meta.getActiveSlotIndex() + 1;
+    if (this.ui.resetConfirmSlotLabel) {
+      this.ui.resetConfirmSlotLabel.textContent = `Save ${slot}`;
+    }
+    this.ui.resetConfirmDialog?.classList.remove("hidden");
+  }
+
+  hideResetConfirm() {
+    this.ui.resetConfirmDialog?.classList.add("hidden");
+  }
+
+  confirmResetProgress() {
+    this.meta.resetActiveSlot();
+    this.hideResetConfirm();
+    this.refreshMenu();
+    this.showSaveProfileView();
   }
 
   bindAudioSliders() {
@@ -276,39 +379,7 @@ export class Game {
     sfx.addEventListener("input", onSfx);
   }
 
-  bindDeathEffectPicker() {
-    const root = this.ui.deathEffectPicker;
-    if (!root) return;
-
-    const selected = this.audio.getDeathEffect();
-    root.innerHTML = "";
-    for (const opt of DEATH_EFFECT_OPTIONS) {
-      const label = document.createElement("label");
-      label.className = "death-effect-option";
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = "death-effect";
-      input.value = opt.id;
-      input.checked = opt.id === selected;
-      input.addEventListener("change", () => {
-        if (!input.checked) return;
-        this.audio.setDeathEffect(opt.id);
-        this.unlockAudio();
-      });
-      const text = document.createElement("span");
-      text.className = "death-effect-label";
-      text.textContent = opt.label;
-      const hint = document.createElement("span");
-      hint.className = "death-effect-hint";
-      hint.textContent = opt.hint;
-      label.appendChild(input);
-      label.appendChild(text);
-      label.appendChild(hint);
-      root.appendChild(label);
-    }
-  }
-
-  closeAllMenuTabs() {
+  closeAllMenuTabs({ keepAudio = false } = {}) {
     for (const ui of [
       this.skillTreeUI,
       this.weaponTabUI,
@@ -319,6 +390,8 @@ export class Game {
     ]) {
       ui.setOpen(false);
     }
+    this.leaderboardUI?.setOpen(false);
+    if (!keepAudio) this.audioUI?.setOpen(false);
   }
 
   openMenuTab(tab) {
@@ -335,15 +408,19 @@ export class Game {
   }
 
   showSaveSelectView() {
+    this.hideResetConfirm();
     this.ui.saveSelectView?.classList.remove("hidden");
     this.ui.saveProfileView?.classList.add("hidden");
     this.ui.backToSavesBtn?.classList.add("hidden");
     this.ui.overlayTitle.textContent = "Bullet Hell 3D";
     this.ui.overlayTitle.classList.remove("victory-title");
     this.ui.overlayText.textContent = "Choose a save file to manage skills, weapons, and progress.";
+    this.ui.overlay?.setAttribute("data-menu-view", "select");
     this.meta.setLastMenuView("select");
     this.closeAllMenuTabs();
+    this.audioUI?.setProfileVisible(false);
     this.renderSaveSlots();
+    this.ui.overlay?.scrollTo(0, 0);
     this.updateSaveWarning();
   }
 
@@ -351,12 +428,15 @@ export class Game {
     this.ui.saveSelectView?.classList.add("hidden");
     this.ui.saveProfileView?.classList.remove("hidden");
     this.ui.backToSavesBtn?.classList.remove("hidden");
+    this.ui.overlay?.setAttribute("data-menu-view", "profile");
+    this.audioUI?.setProfileVisible(true);
     const slot = this.meta.getActiveSlotIndex() + 1;
     this.ui.overlayTitle.textContent = `Save ${slot}`;
     this.ui.overlayText.textContent = "Spend bank score, pick loadout, then start your run.";
     this.meta.setLastMenuView("profile");
     this.openMenuTab("skills");
     this.refreshMenu();
+    this.ui.overlay?.scrollTo(0, 0);
     this.updateSaveWarning();
     if (this.audio.unlocked) this.audio.playMenu();
   }
@@ -395,13 +475,14 @@ export class Game {
 
   bindRunButtons() {
     this.ui.continueRunBtn?.addEventListener("click", () => {
-      this.audio.unlock();
+      this.unlockAudio();
       this.continueRun();
     });
   }
 
   unlockAudio() {
     this.audio.unlock();
+    void this.audio.preloadDeathSfx();
     this.audio.playMenu();
   }
 
@@ -427,7 +508,10 @@ export class Game {
       if (idx >= 0 && idx < weapons.length) {
         this.player.weaponId = weapons[idx].id;
         this.meta.selectedWeapon = weapons[idx].id;
+        this.player.applyWeaponPassive();
+        resetShootSuppress(this.player);
         this.player.maxHealth = this.player.getEffectiveMaxHealth();
+        this.companions.sync(this.player.runState, this.player);
         this.updateWeaponLabel();
       }
     });
@@ -486,6 +570,19 @@ export class Game {
     };
   }
 
+  _notifyAchievementUnlocks(unlocked) {
+    for (const ach of unlocked) {
+      this.unlockToastUI?.showAchievement(ach, getUnlockable(ach.reward));
+      this.newUnlockToast.push(`Achievement: ${ach.name}`);
+    }
+  }
+
+  _evaluateAndNotifyAchievements(overrides = {}) {
+    const unlocked = evaluateAchievements(this.meta, this.getAchievementContext(overrides));
+    this._notifyAchievementUnlocks(unlocked);
+    return unlocked;
+  }
+
   onCombatRoomCleared() {
     const type = this.roomManager.currentRoomType;
     if (type === PATH_TYPES.HARD) this.runAch.hardClearsThisRun++;
@@ -497,12 +594,7 @@ export class Game {
         this.runAch.bestFlawlessStreak = Math.max(this.runAch.bestFlawlessStreak, this.runAch.flawlessStreak);
       }
     }
-    if (this.hardModeActive) {
-      const unlocked = evaluateAchievements(this.meta, this.getAchievementContext());
-      for (const ach of unlocked) {
-        this.newUnlockToast.push(`Hard Mode unlock: ${ach.name}`);
-      }
-    }
+    this._evaluateAndNotifyAchievements();
   }
 
   getChallengeProgressContext(floorOverride) {
@@ -544,6 +636,7 @@ export class Game {
     this.activeChallenge = null;
 
     const rewardLabel = getChallengeRewardLabel(challenge);
+    this.unlockToastUI?.showChallenge(challenge, getUnlockable(challenge.reward));
     this.newUnlockToast.push(`Challenge cleared: ${challenge.name}`);
     this.newUnlockToast.push(`Reward: ${rewardLabel}`);
 
@@ -570,10 +663,8 @@ export class Game {
   finalizeRunProgress() {
     const floors = this.roomManager.floorsCleared;
     this.tryCompleteActiveChallenge();
-    const unlocked = evaluateAchievements(this.meta, this.getAchievementContext({ runFloors: floors }));
-    for (const ach of unlocked) {
-      this.newUnlockToast.push(`Achievement: ${ach.name}`);
-    }
+    this._evaluateAndNotifyAchievements({ runFloors: floors });
+    this.submitLeaderboardRun();
   }
 
   bindPause() {
@@ -901,6 +992,7 @@ export class Game {
     this.companions.clear();
     this.abilitySystem.resetTransient();
     this.player.abilityShieldTimer = 0;
+    resetShootSuppress(this.player);
   }
 
   applyRunAbility() {
@@ -931,6 +1023,7 @@ export class Game {
     this.running = true;
     this.deathHandled = false;
     this.newUnlockToast = [];
+    this.unlockToastUI?.clear();
     this.cleanupRun();
 
     const resumeUi = restoreRunSnapshot(this, snapshot);
@@ -946,6 +1039,7 @@ export class Game {
     this.deathHandled = false;
     this.score = 0;
     this.newUnlockToast = [];
+    this.unlockToastUI?.clear();
     this.runAch = createRunAchievementState();
     this.activeChallenge = getChallenge(this.meta.selectedChallenge);
     this.hardModeActive = this.meta.hardModeEnabled;
@@ -968,6 +1062,8 @@ export class Game {
 
   enterGameplay(resumeUi) {
     this.clock.start();
+    this.hideResetConfirm();
+    this.leaderboardUI?.setOpen(false);
 
     this.ui.overlay.classList.add("hidden");
     this.ui.backToSavesBtn?.classList.add("hidden");
@@ -984,6 +1080,8 @@ export class Game {
     this.updateWeaponLabel();
     this.resumeSuspendedUi(resumeUi);
     this._musicTrack = "combat";
+    this.audio.ensureActive();
+    void this.audio.preloadDeathSfx();
     this.audio.playCombat();
     this.loop();
   }
@@ -1018,12 +1116,6 @@ export class Game {
   onBossDefeated() {
     this.combo.reset();
     this.runAch.bossesThisRun++;
-    if (this.hardModeActive) {
-      const unlocked = evaluateAchievements(this.meta, this.getAchievementContext());
-      for (const ach of unlocked) {
-        this.newUnlockToast.push(`Hard Mode unlock: ${ach.name}`);
-      }
-    }
     if (!this.runAch.bossDamageTaken) {
       this.meta.recordLifetime((lt) => {
         lt.ghostBosses = (lt.ghostBosses ?? 0) + 1;
@@ -1032,6 +1124,7 @@ export class Game {
     this.meta.recordLifetime((lt) => {
       lt.bossesDefeated = (lt.bossesDefeated ?? 0) + 1;
     });
+    this._evaluateAndNotifyAchievements();
 
     if (!this.meta.bossDefeated) {
       this.meta.bossDefeated = true;
@@ -1174,11 +1267,13 @@ export class Game {
     for (const enemy of this.roomManager.enemies) {
       if (enemy.alive && enemy.statuses) updateStatuses(enemy, simDt);
     }
+    updateShootSuppress(this.player, dt, this.roomManager.enemies);
+    this.player.syncSuppressRing();
     this.roomManager.update(simDt, this.player, this.bulletPool, this.abilitySystem.getEnemyMoveMult());
 
     if (!transitioning && !bossIntro) this.checkCollisions();
     this.debris.update(simDt);
-    this.deathEffects.update(simDt);
+    this.deathEffects.update(dt);
     this.updateParticles(simDt);
     if (this.playerLight) this.playerLight.position.set(this.player.x, 3, this.player.z);
     if (this.shakeTimer > 0) this.shakeTimer -= dt;
@@ -1197,7 +1292,7 @@ export class Game {
       this.meta.recordLifetime((lt) => {
         lt.chairKills = (lt.chairKills ?? 0) + 1;
       });
-      evaluateAchievements(this.meta, this.getAchievementContext());
+      this._evaluateAndNotifyAchievements();
     }
   }
 
@@ -1488,6 +1583,18 @@ export class Game {
         abilityEl.classList.remove("hidden");
       } else {
         abilityEl.classList.add("hidden");
+      }
+    }
+    const suppressEl = document.getElementById("suppress-label");
+    if (suppressEl) {
+      const suppress = this.running ? getShootSuppressHud(this.player) : null;
+      if (suppress) {
+        suppressEl.textContent = suppress.text;
+        suppressEl.classList.remove("hidden", "suppress-active", "suppress-warn");
+        suppressEl.classList.add(suppress.mode === "active" ? "suppress-active" : "suppress-warn");
+      } else {
+        suppressEl.classList.add("hidden");
+        suppressEl.classList.remove("suppress-active", "suppress-warn");
       }
     }
     const msg = this.roomManager.getMessage();

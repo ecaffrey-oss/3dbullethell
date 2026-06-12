@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { COLORS, ENEMY_BULLET_SPEED } from "./constants.js";
 import { pickBossAttacks, pickPostBossAttacks } from "./BossAttacks.js";
 import { updateStatuses } from "./StatusEffects.js";
-import { isWithinNoShootSuppress } from "./Weapons.js";
+import { isEnemyShootSuppressed } from "./Weapons.js";
 
 const BOSS_MAX_HEALTH = 320;
 const PHASE2_THRESHOLD = 210;
@@ -196,14 +196,14 @@ export class Boss {
     }
 
     if (this.laserState !== "idle") {
-      if (!isWithinNoShootSuppress(player, this.x, this.z)) {
+      if (!isEnemyShootSuppressed(player, this)) {
         this.updateLaser(dt, player);
       }
       return;
     }
 
     if (!player.alive) return;
-    if (isWithinNoShootSuppress(player, this.x, this.z)) return;
+    if (isEnemyShootSuppressed(player, this)) return;
 
     const attack = this.activeAttacks[this.attackIndex];
     this.attackTimer -= dt;

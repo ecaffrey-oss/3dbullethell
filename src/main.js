@@ -12,7 +12,16 @@ const game = new Game(document.getElementById("game"), {
   overlayText: document.getElementById("overlay-text"),
   startBtn: document.getElementById("start-btn"),
   saveSlots: document.getElementById("save-slots"),
+  audioTabBtn: document.getElementById("audio-tab-btn"),
+  audioPanel: document.getElementById("audio-panel"),
+  audioSettings: document.getElementById("audio-settings"),
   saveSelectView: document.getElementById("save-select-view"),
+  leaderboardTabBtn: document.getElementById("leaderboard-tab-btn"),
+  leaderboardPanel: document.getElementById("leaderboard-panel"),
+  leaderboardNameInput: document.getElementById("leaderboard-name"),
+  leaderboardScores: document.getElementById("leaderboard-scores"),
+  leaderboardFloors: document.getElementById("leaderboard-floors"),
+  leaderboardStatus: document.getElementById("leaderboard-status"),
   saveProfileView: document.getElementById("save-profile-view"),
   backToSavesBtn: document.getElementById("back-to-saves-btn"),
   continueRunBtn: document.getElementById("continue-run-btn"),
@@ -36,6 +45,12 @@ const game = new Game(document.getElementById("game"), {
   musicVolume: document.getElementById("music-volume"),
   sfxVolume: document.getElementById("sfx-volume"),
   deathEffectPicker: document.getElementById("death-effect-picker"),
+  unlockToastStack: document.getElementById("unlock-toast-stack"),
+  resetProgressBtn: document.getElementById("reset-progress-btn"),
+  resetConfirmDialog: document.getElementById("reset-confirm-dialog"),
+  resetConfirmSlotLabel: document.getElementById("reset-confirm-slot-label"),
+  resetConfirmCancel: document.getElementById("reset-confirm-cancel"),
+  resetConfirmAccept: document.getElementById("reset-confirm-accept"),
   achievementsPanel: document.getElementById("achievements-panel"),
   achievementsContainer: document.getElementById("achievements-list"),
   challengesPanel: document.getElementById("challenges-panel"),
@@ -51,3 +66,7 @@ document.getElementById("start-btn").addEventListener("click", (e) => {
   game.unlockAudio();
   game.start();
 });
+
+if (import.meta.env.DEV) {
+  window.__game = game;
+}

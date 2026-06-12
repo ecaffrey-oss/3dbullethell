@@ -76,6 +76,13 @@ export const UNLOCKABLES = [
     source: { achievement: "chair_hunter" },
   },
   {
+    id: "chair_buddy",
+    type: "weapon",
+    name: "Chair Buddy",
+    desc: "Orbiting chair auto-fires · nearby foes can't shoot",
+    source: { achievement: "chair_hunter" },
+  },
+  {
     id: "relic_overkill",
     type: "relic",
     name: "Overkill Engine",
@@ -165,7 +172,7 @@ export const UNLOCKABLES = [
     id: "ability_phase",
     type: "ability",
     name: "Phase Echo",
-    desc: "Decoy + invuln blink · E · 6s cooldown",
+    desc: "Set return point · E again to warp back · 6s cooldown",
     source: { achievement: "chair_hunter" },
     altSource: { challenge: "ascetic" },
   },

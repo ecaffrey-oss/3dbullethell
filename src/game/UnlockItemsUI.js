@@ -1,5 +1,4 @@
 import { UNLOCKABLES, isUnlockGranted, getUnlockSourceLabel } from "./Unlockables.js";
-import { getWeapon, isWeaponUnlocked } from "./Weapons.js";
 
 export class UnlockItemsUI {
   constructor(meta, panelEl, container, onUpdate) {
@@ -14,7 +13,10 @@ export class UnlockItemsUI {
   bindTab() {
     this.tabBtn = document.getElementById("items-tab-btn");
     if (!this.tabBtn) return;
-    this.tabBtn.addEventListener("click", () => this.setOpen(!this.open));
+    this.tabBtn.addEventListener("click", () => {
+      if (this.handleTabClick) this.handleTabClick();
+      else this.setOpen(!this.open);
+    });
   }
 
   setOpen(open) {
@@ -30,14 +32,14 @@ export class UnlockItemsUI {
 
     const hint = document.createElement("p");
     hint.className = "bank-score";
-    hint.textContent = "Equip a relic for your next run. Unlock weapons appear in the Weapons tab.";
+    hint.textContent = "Equip relics unlocked from achievements and challenges.";
     this.container.appendChild(hint);
 
     const grid = document.createElement("div");
     grid.className = "meta-grid";
 
     for (const item of UNLOCKABLES) {
-      if (item.type === "ability") continue;
+      if (item.type === "ability" || item.type === "weapon") continue;
       const unlocked = isUnlockGranted(this.meta, item);
       const card = document.createElement("div");
       card.className = "meta-card" + (unlocked ? " meta-done" : " meta-locked");
@@ -56,28 +58,6 @@ export class UnlockItemsUI {
           this.meta.selectedRelic = this.meta.selectedRelic === item.id ? null : item.id;
           this.render();
           this.onUpdate?.();
-        });
-        grid.appendChild(btn);
-        continue;
-      }
-
-      if (item.type === "weapon" && unlocked) {
-        const w = getWeapon(item.id);
-        const equipped = this.meta.selectedWeapon === item.id;
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "meta-card meta-card-btn" + (equipped ? " selected" : "");
-        btn.innerHTML = `
-          <span class="skill-name">${item.name}</span>
-          <span class="skill-desc">${w?.description ?? item.desc}</span>
-          <span class="skill-cost">${equipped ? "Equipped weapon" : "Click to equip weapon"}</span>
-        `;
-        btn.addEventListener("click", () => {
-          if (isWeaponUnlocked(w, this.meta)) {
-            this.meta.selectedWeapon = item.id;
-            this.onUpdate?.();
-            this.render();
-          }
         });
         grid.appendChild(btn);
         continue;

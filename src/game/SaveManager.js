@@ -331,4 +331,15 @@ export class SaveManager {
       challenges: slot.challengesCompleted?.length ?? 0,
     };
   }
+
+  resetSlot(index) {
+    if (index < 0 || index >= SLOT_COUNT) return false;
+    this.data.slots[index] = structuredClone(DEFAULT_SLOT);
+    this.saveAll();
+    return true;
+  }
+
+  resetActiveSlot() {
+    return this.resetSlot(this.activeSlot);
+  }
 }

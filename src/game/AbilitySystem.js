@@ -15,7 +15,7 @@ export class AbilitySystem {
     this.chronoSlowTimer = 0;
     this.gravityWellTimer = 0;
     this.shieldMesh = null;
-    this.decoys = [];
+    this.phaseAnchor = null;
     this.overclockBuff = 0;
   }
 
@@ -30,7 +30,7 @@ export class AbilitySystem {
   onRoomStart() {
     this.deathBeamUsed = false;
     this.clearTurrets();
-    this.clearDecoys();
+    this.clearPhaseAnchor();
   }
 
   resetTransient() {
@@ -40,7 +40,7 @@ export class AbilitySystem {
     this.cooldown = 0;
     this.deathBeamUsed = false;
     this.clearTurrets();
-    this.clearDecoys();
+    this.clearPhaseAnchor();
     this.removeShieldMesh();
   }
 
@@ -55,15 +55,18 @@ export class AbilitySystem {
     this.turrets = [];
   }
 
-  clearDecoys() {
-    for (const d of this.decoys) {
-      if (d.mesh?.parent) d.mesh.parent.remove(d.mesh);
-      d.mesh?.traverse?.((c) => {
-        c.geometry?.dispose();
-        c.material?.dispose();
-      });
+  clearPhaseAnchor() {
+    if (!this.phaseAnchor?.mesh) {
+      this.phaseAnchor = null;
+      return;
     }
-    this.decoys = [];
+    const mesh = this.phaseAnchor.mesh;
+    if (mesh.parent) mesh.parent.remove(mesh);
+    mesh.traverse((child) => {
+      child.geometry?.dispose();
+      child.material?.dispose();
+    });
+    this.phaseAnchor = null;
   }
 
   getEnemyMoveMult() {
@@ -96,7 +99,7 @@ export class AbilitySystem {
     } else {
       this.removeShieldMesh();
     }
-    this.updateDecoys(dt);
+    this.updatePhaseAnchor(dt);
     this.updateTurrets(dt, bulletPool, enemies);
     this.updateFx(dt);
 
@@ -152,8 +155,7 @@ export class AbilitySystem {
         if (this.doChainLightning(player, enemies, onEnemyKilled)) this.setCooldownFromDef(def, player);
         break;
       case "ability_phase":
-        this.doPhaseEcho(player, dir, arena);
-        this.setCooldownFromDef(def, player);
+        if (this.doPhaseEcho(player, arena)) this.setCooldownFromDef(def, player);
         break;
       case "ability_overclock":
         this.doOverclock(player);
@@ -303,41 +305,71 @@ export class AbilitySystem {
     this.fx.push({ mesh, life: 0.12 });
   }
 
-  doPhaseEcho(player, dir, arena) {
-    const len = Math.hypot(dir.x, dir.z) || 1;
-    const dx = dir.x / len;
-    const dz = dir.z / len;
-
-    const decoy = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.35, 0.45, 0.9, 6),
-      new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.55 })
-    );
-    decoy.position.set(player.x, 0.5, player.z);
-    this.scene.add(decoy);
-    this.decoys.push({ x: player.x, z: player.z, vx: dx * 4, vz: dz * 4, mesh: decoy, life: 2.2 });
-
-    player.dashTimer = 0.18;
-    player.dashVX = dx * 18;
-    player.dashVZ = dz * 18;
-    player.invincibleTimer = Math.max(player.invincibleTimer, 0.35);
-    this.spawnRing(player.x, player.z, 0x88ccff, 1.1, 0.28);
+  doPhaseEcho(player, arena) {
+    if (!this.phaseAnchor) {
+      this.setPhaseAnchor(player.x, player.z);
+      return false;
+    }
+    return this.teleportToPhaseAnchor(player, arena);
   }
 
-  updateDecoys(dt) {
-    for (let i = this.decoys.length - 1; i >= 0; i--) {
-      const d = this.decoys[i];
-      d.life -= dt;
-      d.x += d.vx * dt;
-      d.z += d.vz * dt;
-      d.mesh.position.set(d.x, 0.5, d.z);
-      d.mesh.material.opacity = Math.max(0, d.life * 0.35);
-      if (d.life <= 0) {
-        this.scene.remove(d.mesh);
-        d.mesh.geometry?.dispose();
-        d.mesh.material?.dispose();
-        this.decoys.splice(i, 1);
-      }
+  setPhaseAnchor(x, z) {
+    this.clearPhaseAnchor();
+    const group = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.42, 0.68, 28),
+      new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.75, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.06;
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.26, 0.32, 1.05, 6),
+      new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.42 })
+    );
+    pillar.position.y = 0.52;
+    group.add(ring, pillar);
+    group.position.set(x, 0, z);
+    this.scene.add(group);
+    this.phaseAnchor = { x, z, mesh: group, pulse: 0 };
+    this.spawnRing(x, z, 0x88ccff, 0.85, 0.3);
+  }
+
+  teleportToPhaseAnchor(player, arena) {
+    const anchor = this.phaseAnchor;
+    if (!anchor) return false;
+
+    let tx = anchor.x;
+    let tz = anchor.z;
+    if (arena) {
+      const c = arena.clampPlayer(tx, tz, PLAYER_RADIUS, { ignoreCovers: true });
+      tx = c.x;
+      tz = c.z;
     }
+
+    const fromX = player.x;
+    const fromZ = player.z;
+    player.x = tx;
+    player.z = tz;
+    player.group.position.set(tx, player.group.position.y, tz);
+    player.dashTimer = 0;
+    player.dashVX = 0;
+    player.dashVZ = 0;
+    player.invincibleTimer = Math.max(player.invincibleTimer, 0.28);
+
+    this.spawnRing(fromX, fromZ, 0x88ccff, 0.9, 0.22);
+    this.spawnRing(tx, tz, 0x88ccff, 1.15, 0.38);
+    this.clearPhaseAnchor();
+    return true;
+  }
+
+  updatePhaseAnchor(dt) {
+    if (!this.phaseAnchor?.mesh) return;
+    this.phaseAnchor.pulse += dt * 4.5;
+    const pulse = Math.sin(this.phaseAnchor.pulse);
+    const scale = 1 + pulse * 0.1;
+    this.phaseAnchor.mesh.scale.set(scale, 1, scale);
+    const pillar = this.phaseAnchor.mesh.children[1];
+    if (pillar?.material) pillar.material.opacity = 0.32 + (pulse + 1) * 0.12;
   }
 
   doNova(player, enemies, onEnemyKilled) {
@@ -519,6 +551,9 @@ export class AbilitySystem {
     if (this.overclockBuff > 0) return `Overclock ${this.overclockBuff.toFixed(1)}s`;
     if (def.id === "ability_gravity" && this.gravityWellTimer > 0) {
       return `Gravity ${this.gravityWellTimer.toFixed(1)}s`;
+    }
+    if (def.id === "ability_phase" && this.phaseAnchor) {
+      return `${def.name} · press E to return`;
     }
     if (def.oncePerRoom) return this.deathBeamUsed ? "Beam spent" : "Beam ready";
     if (this.cooldown > 0) return `${def.name} ${this.cooldown.toFixed(1)}s`;

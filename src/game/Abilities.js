@@ -86,7 +86,7 @@ export const ABILITIES = [
   {
     id: "ability_phase",
     name: "Phase Echo",
-    desc: "Leave a decoy while you blink invulnerable forward · 6s cooldown",
+    desc: "Set a return point · press E again to teleport back · 6s cooldown",
     keyHint: "E",
     cooldown: 6,
     source: { achievement: "chair_hunter" },
