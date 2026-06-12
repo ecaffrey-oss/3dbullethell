@@ -1,3 +1,4 @@
+import "@fontsource/press-start-2p";
 import "./style.css";
 import { Game } from "./game/Game.js";
 import { MenuMouseRepel } from "./game/MenuMouseRepel.js";

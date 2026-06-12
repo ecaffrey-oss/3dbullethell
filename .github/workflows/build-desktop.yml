@@ -1,0 +1,63 @@
+name: Build Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install and build Windows installer
+        run: |
+          npm ci
+          npm run dist:win
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: bullet-hell-3d-windows
+          path: |
+            release/*.exe
+            release/win-unpacked/
+
+  build-macos:
+    runs-on: macos-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install and build macOS disk image
+        run: |
+          npm ci
+          npm run dist:mac
+
+      - name: Upload macOS disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: bullet-hell-3d-macos
+          path: |
+            release/*.dmg
+            release/mac/
