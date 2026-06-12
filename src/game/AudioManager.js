@@ -1,5 +1,6 @@
 const AUDIO_SETTINGS_KEY = "bulletHell3d_audio";
-const MUSIC_URL = "/sounds/music.mp3";
+const soundUrl = (file) => `${import.meta.env.BASE_URL}sounds/${file}`;
+const MUSIC_URL = soundUrl("music.mp3");
 const MUSIC_BASE_GAIN = 0.14;
 const SFX_BASE_GAIN = 0.42;
 
@@ -134,7 +135,7 @@ export class AudioManager {
 
   async _loadSquish() {
     try {
-      const res = await fetch("/sounds/squish.mp3");
+      const res = await fetch(soundUrl("squish.mp3"));
       if (!res.ok) return;
       const data = await res.arrayBuffer();
       if (!this.ctx) return;

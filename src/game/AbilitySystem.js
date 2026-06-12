@@ -159,6 +159,10 @@ export class AbilitySystem {
         this.doOverclock(player);
         this.setCooldownFromDef(def, player);
         break;
+      case "ability_bloodlust":
+        this.doBloodlust(player, enemies, onEnemyKilled);
+        this.setCooldownFromDef(def, player);
+        break;
       default:
         break;
     }
@@ -344,6 +348,17 @@ export class AbilitySystem {
       if (enemy.takeDamage(9999)) onEnemyKilled?.(enemy);
     }
     this.spawnRing(player.x, player.z, 0xff66cc, radius, 0.45);
+  }
+
+  doBloodlust(player, enemies, onEnemyKilled) {
+    const radius = 4.2;
+    for (const enemy of enemies) {
+      if (!enemy.alive) continue;
+      if (Math.hypot(enemy.x - player.x, enemy.z - player.z) > radius) continue;
+      if (enemy.takeDamage(9999)) onEnemyKilled?.(enemy);
+    }
+    player.health = Math.min(player.maxHealth, player.health + 2);
+    this.spawnRing(player.x, player.z, 0xff2244, radius, 0.5);
   }
 
   doWall(player, aim, arena) {

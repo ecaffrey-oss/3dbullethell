@@ -10,7 +10,7 @@ import {
   MAX_ENEMY_BULLETS,
   MAX_PLAYER_BULLETS,
 } from "./constants.js";
-import { beamMaxLength } from "./BeamUtils.js";
+import { beamMaxLength, snapAimToEnemy, reflectBeamDir } from "./BeamUtils.js";
 
 export class BulletPool {
   constructor(scene) {
@@ -69,8 +69,15 @@ export class BulletPool {
     if (!this._ensureSlot(true)) return false;
 
     const len = Math.hypot(dirX, dirZ) || 1;
-    const dx = dirX / len;
-    const dz = dirZ / len;
+    let dx = dirX / len;
+    let dz = dirZ / len;
+
+    if (opts.homing && opts.enemies?.length) {
+      const snap = snapAimToEnemy(x, z, dx, dz, opts.enemies, opts.homingRange ?? 28);
+      dx = snap.dx;
+      dz = snap.dz;
+    }
+
     const length = beamMaxLength(arena, x, z, dx, dz, opts.maxLen ?? 36);
     if (length < 0.5) return false;
 
@@ -113,6 +120,21 @@ export class BulletPool {
       life,
       hitSet: new Set(),
     });
+
+    if (opts.bounce && (opts.bounces ?? 0) > 0) {
+      const depth = opts._beamDepth ?? 0;
+      if (depth < 4) {
+        const ex = x + dx * length;
+        const ez = z + dz * length;
+        const ref = reflectBeamDir(dx, dz, arena, ex, ez);
+        this.spawnBeamLine(ex, ez, ref.dx, ref.dz, arena, damage * 0.88, {
+          ...opts,
+          _beamDepth: depth + 1,
+          bounces: (opts.bounces ?? 4) - 1,
+        });
+      }
+    }
+
     return true;
   }
 

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { COLORS } from "./constants.js";
 
-export const ROOM_SIZES = { small: 26, medium: 32, large: 42 };
+export const ROOM_SIZES = { small: 26, medium: 32, large: 42, xlarge: 58 };
 
 export const ROOM_SHAPES = {
   square: { id: "square", aspect: [1, 1], type: "rect" },

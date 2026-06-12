@@ -197,6 +197,27 @@ export const UNLOCKABLES = [
     desc: "−12% ability cooldown",
     source: { challenge: "drift_surf" },
   },
+  {
+    id: "shard_storm",
+    type: "weapon",
+    name: "Shard Storm",
+    desc: "Triple homing shards · fast fire",
+    source: { achievement: "hard_mode_boss" },
+  },
+  {
+    id: "relic_painforge",
+    type: "relic",
+    name: "Painforge",
+    desc: "+3 run damage · −1 max HP",
+    source: { achievement: "hard_mode_initiate" },
+  },
+  {
+    id: "ability_bloodlust",
+    type: "ability",
+    name: "Bloodlust",
+    desc: "Nova burst that heals you · E · 5s cooldown",
+    source: { achievement: "hard_mode_unbroken" },
+  },
 ];
 
 const RELIC_EFFECTS = {
@@ -241,6 +262,13 @@ const RELIC_EFFECTS = {
   },
   relic_rift: (rs) => {
     rs.abilityCooldownMult *= 0.88;
+  },
+  relic_painforge: (rs, player) => {
+    rs.damageBonus += 3;
+    rs.maxHealthBonus -= 1;
+    if (player.challengeMaxHealth != null) {
+      player.challengeMaxHealth = Math.max(1, player.challengeMaxHealth - 1);
+    }
   },
 };
 

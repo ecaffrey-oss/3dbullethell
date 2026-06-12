@@ -57,6 +57,7 @@ export class Game {
     this.newUnlockToast = [];
     this.audio = new AudioManager();
     this.combo = new ComboSystem();
+    this.hardModeActive = false;
     this._musicTrack = null;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -156,6 +157,7 @@ export class Game {
         }
       }, { playerHealth: this.player.health });
     };
+    this.roomManager.onUpgradeRoomStart = () => this.openUpgradeRoom();
 
     this.pathUI = new PathUI(ui.pathPanel, ui.shopPanel);
     this.minigameUI = new MinigameUI(ui.minigamePanel);
@@ -390,7 +392,8 @@ export class Game {
     this.updateRunButtons();
     const slot = this.meta.getActiveSlotIndex() + 1;
     const ch = this.meta.selectedChallenge ? getChallenge(this.meta.selectedChallenge)?.name : "Normal";
-    this.ui.bankScoreMenu.textContent = `Save ${slot} · Bank: ${this.meta.bankScore} pts · Best floor: ${this.meta.maxFloorsCleared} · Run: ${ch}`;
+    const hard = this.meta.hardModeEnabled ? " · Hard Mode" : "";
+    this.ui.bankScoreMenu.textContent = `Save ${slot} · Bank: ${this.meta.bankScore} pts · Best floor: ${this.meta.maxFloorsCleared} · Run: ${ch}${hard}`;
   }
 
   updateChallengeBleed(dt) {
@@ -414,15 +417,38 @@ export class Game {
     return !!(this.activeChallenge?.mods?.noShop);
   }
 
+  getAchievementContext(overrides = {}) {
+    const lifetime = this.meta.getLifetime();
+    return {
+      runFloors: this.roomManager.floorsCleared,
+      runBosses: this.runAch.bossesThisRun,
+      runKills: this.runAch.killsThisRun,
+      runHardClears: this.runAch.hardClearsThisRun,
+      bestFlawlessStreak: this.runAch.bestFlawlessStreak,
+      bankScore: this.meta.bankScore,
+      lifetimeBosses: lifetime.bossesDefeated,
+      lifetimeChairKills: lifetime.chairKills,
+      lifetimeGhostBosses: lifetime.ghostBosses,
+      hardModeRun: !!this.hardModeActive,
+      ...overrides,
+    };
+  }
+
   onCombatRoomCleared() {
     const type = this.roomManager.currentRoomType;
     if (type === PATH_TYPES.HARD) this.runAch.hardClearsThisRun++;
-    if (type === PATH_TYPES.COMBAT || type === PATH_TYPES.HARD) {
+    if (type === PATH_TYPES.COMBAT || type === PATH_TYPES.HARD || type === PATH_TYPES.WAVES) {
       if (this.runAch.roomDamageTaken) {
         this.runAch.flawlessStreak = 0;
       } else {
         this.runAch.flawlessStreak++;
         this.runAch.bestFlawlessStreak = Math.max(this.runAch.bestFlawlessStreak, this.runAch.flawlessStreak);
+      }
+    }
+    if (this.hardModeActive) {
+      const unlocked = evaluateAchievements(this.meta, this.getAchievementContext());
+      for (const ach of unlocked) {
+        this.newUnlockToast.push(`Hard Mode unlock: ${ach.name}`);
       }
     }
   }
@@ -491,20 +517,8 @@ export class Game {
 
   finalizeRunProgress() {
     const floors = this.roomManager.floorsCleared;
-    const lifetime = this.meta.getLifetime();
     this.tryCompleteActiveChallenge();
-    const ctx = {
-      runFloors: floors,
-      runBosses: this.runAch.bossesThisRun,
-      runKills: this.runAch.killsThisRun,
-      runHardClears: this.runAch.hardClearsThisRun,
-      bestFlawlessStreak: this.runAch.bestFlawlessStreak,
-      bankScore: this.meta.bankScore,
-      lifetimeBosses: lifetime.bossesDefeated,
-      lifetimeChairKills: lifetime.chairKills,
-      lifetimeGhostBosses: lifetime.ghostBosses,
-    };
-    const unlocked = evaluateAchievements(this.meta, ctx);
+    const unlocked = evaluateAchievements(this.meta, this.getAchievementContext({ runFloors: floors }));
     for (const ach of unlocked) {
       this.newUnlockToast.push(`Achievement: ${ach.name}`);
     }
@@ -706,6 +720,23 @@ export class Game {
     });
   }
 
+  openUpgradeRoom() {
+    if (this.challengeBlocksUpgrades()) {
+      this.player.health = Math.min(this.player.maxHealth, this.player.health + 1);
+      this.ui.message.textContent = "Ascetic seal — shrine salve instead (+1 ♥)";
+      this.ui.message.classList.remove("hidden");
+      setTimeout(() => this.ui.message.classList.add("hidden"), 2200);
+      this.roomManager.finishUpgradeRoom();
+      return;
+    }
+    this.runUpgradeUI.show(this.player.runState, () => {
+      this.roomManager.finishUpgradeRoom();
+      this.player.respawnPosition();
+      this.hazardSystem.clear();
+      this.bulletPool.compact();
+    });
+  }
+
   openShop() {
     if (this.challengeBlocksShop()) {
       this.ui.message.textContent = "Ascetic challenge — shops are sealed";
@@ -850,6 +881,7 @@ export class Game {
     this.newUnlockToast = [];
     this.runAch = createRunAchievementState();
     this.activeChallenge = getChallenge(this.meta.selectedChallenge);
+    this.hardModeActive = this.meta.hardModeEnabled;
 
     this.cleanupRun();
     this.player.applyMeta(this.meta);
@@ -859,6 +891,7 @@ export class Game {
     this.player.applyRunSetup({
       challengeMods: this.activeChallenge?.mods,
       relicId: this.meta.selectedRelic,
+      hardMode: this.hardModeActive,
     });
     this.applyRunAbility();
     this.companions.sync(this.player.runState, this.player);
@@ -908,12 +941,22 @@ export class Game {
     }
     if (resumeUi === "chance") {
       this.roomManager.onChanceRoomStart?.();
+      return;
+    }
+    if (resumeUi === "upgrade") {
+      this.roomManager.onUpgradeRoomStart?.();
     }
   }
 
   onBossDefeated() {
     this.combo.reset();
     this.runAch.bossesThisRun++;
+    if (this.hardModeActive) {
+      const unlocked = evaluateAchievements(this.meta, this.getAchievementContext());
+      for (const ach of unlocked) {
+        this.newUnlockToast.push(`Hard Mode unlock: ${ach.name}`);
+      }
+    }
     if (!this.runAch.bossDamageTaken) {
       this.meta.recordLifetime((lt) => {
         lt.ghostBosses = (lt.ghostBosses ?? 0) + 1;
@@ -1029,6 +1072,7 @@ export class Game {
 
     this.player.comboDamageMult = this.combo.damageMult;
     this.player.comboFireRateMult = this.combo.fireRateMult;
+    this.player.combatEnemies = this.roomManager.enemies;
 
     if (!transitioning && !bossIntro && !this.isGameplayBlocked()) {
       this.player.update(simDt, this.input, this.camera, this.canvas, this.bulletPool);
@@ -1078,17 +1122,7 @@ export class Game {
       this.meta.recordLifetime((lt) => {
         lt.chairKills = (lt.chairKills ?? 0) + 1;
       });
-      evaluateAchievements(this.meta, {
-        runFloors: this.roomManager.floorsCleared,
-        runBosses: this.runAch.bossesThisRun,
-        runKills: this.runAch.killsThisRun,
-        runHardClears: this.runAch.hardClearsThisRun,
-        bestFlawlessStreak: this.runAch.bestFlawlessStreak,
-        bankScore: this.meta.bankScore,
-        lifetimeBosses: this.meta.getLifetime().bossesDefeated,
-        lifetimeChairKills: this.meta.getLifetime().chairKills,
-        lifetimeGhostBosses: this.meta.getLifetime().ghostBosses,
-      });
+      evaluateAchievements(this.meta, this.getAchievementContext());
     }
   }
 
@@ -1309,19 +1343,35 @@ export class Game {
       text.textContent = `${hp}/${max}`;
     }
     document.getElementById("score-label").textContent = `Score: ${this.score}`;
-    const comboHud = document.getElementById("combo-hud");
+    const comboMeter = document.getElementById("combo-meter");
     const comboMult = document.getElementById("combo-mult");
     const comboFill = document.getElementById("combo-bar-fill");
-    if (comboHud && comboMult && comboFill) {
+    if (comboMeter && comboMult && comboFill) {
       if (this.running && this.combo.active) {
-        comboHud.classList.remove("hidden");
-        comboMult.textContent = `${this.combo.level}x`;
+        comboMeter.classList.remove("hidden");
+        comboMeter.setAttribute("aria-hidden", "false");
+        comboMeter.classList.toggle("combo-pop", this.combo.shakePulse > 0);
+        comboMeter.style.setProperty("--combo-shake", String(0.35 + this.combo.intensity * 0.85));
+
+        comboMult.textContent = this.combo.displayLabel;
         comboFill.style.width = `${this.combo.idleFraction * 100}%`;
+
+        const t = this.combo.intensity;
+        const wobble = Math.sin(performance.now() * 0.009) * 14;
+        const hue = 48 - t * 48 + wobble;
+        const hue2 = hue + 18 + Math.sin(performance.now() * 0.011 + 1.2) * 10;
+        comboFill.style.background = `linear-gradient(90deg, hsl(${hue}, 100%, 52%), hsl(${hue2}, 100%, 62%))`;
+        comboMult.style.color = `hsl(${hue + 6}, 100%, 72%)`;
+        comboMult.style.textShadow = `0 0 10px hsla(${hue}, 100%, 55%, 0.7), 1px 1px 0 #442200`;
       } else {
-        comboHud.classList.add("hidden");
+        comboMeter.classList.add("hidden");
+        comboMeter.classList.remove("combo-pop");
+        comboMeter.setAttribute("aria-hidden", "true");
       }
     }
-    document.getElementById("scale-label").textContent = `HP×${this.roomManager.healthScale.toFixed(1)} · Boss ${Math.max(0, this.roomManager.nextBossIn - this.roomManager.roomsSinceBoss)}`;
+    document.getElementById("scale-label").textContent =
+      `HP×${this.roomManager.healthScale.toFixed(1)} · Boss ${Math.max(0, this.roomManager.nextBossIn - this.roomManager.roomsSinceBoss)}` +
+      (this.hardModeActive ? " · HARD" : "");
     const upgradesEl = document.getElementById("upgrades-label");
     if (upgradesEl) {
       const ch = this.activeChallenge ? ` · ${this.activeChallenge.name}` : "";

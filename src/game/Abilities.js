@@ -100,6 +100,14 @@ export const ABILITIES = [
     cooldown: 14,
     source: { challenge: "pacifist_rooms" },
   },
+  {
+    id: "ability_bloodlust",
+    name: "Bloodlust",
+    desc: "Damage nearby foes and heal 2 HP · 5s cooldown",
+    keyHint: "E",
+    cooldown: 5,
+    source: { achievement: "hard_mode_unbroken" },
+  },
 ];
 
 export function getAbility(id) {

@@ -10,6 +10,7 @@ const DEFAULT_SLOT = {
   exclusivePicks: {},
   selectedWeapon: "pulse",
   selectedChallenge: null,
+  hardModeEnabled: false,
   selectedRelic: null,
   selectedAbility: null,
   achievements: [],
@@ -145,6 +146,16 @@ export class SaveManager {
   set selectedChallenge(id) {
     this.mutateActive((s) => {
       s.selectedChallenge = id;
+    });
+  }
+
+  get hardModeEnabled() {
+    return !!this.getActive().hardModeEnabled;
+  }
+
+  set hardModeEnabled(on) {
+    this.mutateActive((s) => {
+      s.hardModeEnabled = !!on;
     });
   }
 

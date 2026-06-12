@@ -1,0 +1,17 @@
+Backup checkpoint: backup/jun-11-2026
+Created: 2026-06-11
+
+This snapshot includes wave defense fix, route skill-tree map, skill tree expansions,
+and all prior gameplay updates on branch cursor/combo-debris-audio-and-gameplay-updates.
+
+Restore everything to this point:
+  cd ~/Projects/bullet-hell-3d
+  git checkout backup/jun-11-2026
+
+Or restore only the tagged commit on your current branch:
+  git checkout cursor/combo-debris-audio-and-gameplay-updates
+  git reset --hard backup/jun-11-2026
+
+List backups:
+  git tag -l 'backup/*'
+  git branch -a | grep backup

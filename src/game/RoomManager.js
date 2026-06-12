@@ -25,6 +25,7 @@ export class RoomManager {
     this.onShopOpen = null;
     this.onMinigameStart = null;
     this.onChanceRoomStart = null;
+    this.onUpgradeRoomStart = null;
     this.onRoomReady = null;
     this.bossDefeatsThisRun = 0;
     this.pendingBoss = false;
@@ -36,6 +37,9 @@ export class RoomManager {
     this.bonusOutcome = null;
     this.challengeMods = null;
     this._lastHazardIntensity = 0;
+    this.waveTotal = 0;
+    this.wavesSpawned = 0;
+    this.waveBreakTimer = 0;
   }
 
   get scaledEnemyFireMult() {
@@ -88,6 +92,9 @@ export class RoomManager {
     this.chanceOutcome = null;
     this.bonusOutcome = null;
     this.challengeMods = null;
+    this.waveTotal = 0;
+    this.wavesSpawned = 0;
+    this.waveBreakTimer = 0;
     this.arenaHazards?.clear();
     this.clearEnemies();
     this.spawnIntroRoom();
@@ -137,6 +144,28 @@ export class RoomManager {
     }
   }
 
+  _spawnWaveDefenseWave() {
+    this.wavesSpawned++;
+    const wave = this.wavesSpawned;
+    const pool = getEnemyPoolForStage(this.floorsCleared);
+    let count = 3 + wave + Math.floor(this.floorsCleared / 2);
+    count = Math.max(2, Math.round(count * (this.challengeMods?.enemyCountMult ?? 1)));
+    const scale =
+      this.healthScale * (1 + (wave - 1) * 0.1) * (this.challengeMods?.enemyHealthMult ?? 1);
+    for (let i = 0; i < count; i++) {
+      let t = pool[Math.floor(Math.random() * pool.length)];
+      if (this.challengeMods?.eliteBias && this.floorsCleared >= 2 && Math.random() < 0.15) {
+        t = "elite";
+      }
+      const p = this.arena.randomEnemyPoint();
+      this._spawnEnemy(t, p.x, p.z, scale);
+    }
+    if (wave === this.waveTotal && Math.random() < 0.45) {
+      const p = this.arena.randomEnemyPoint();
+      this._spawnEnemy("elite", p.x, p.z, scale * 1.25);
+    }
+  }
+
   spawnRoom(type) {
     this.clearEnemies();
     this.hazardSystem?.clear();
@@ -147,9 +176,12 @@ export class RoomManager {
     this.isBossRoom = type === PATH_TYPES.BOSS;
     this.roomScoreMultiplier = type === PATH_TYPES.HARD ? 2 : 1;
     this.restHealed = false;
+    this.waveTotal = 0;
+    this.wavesSpawned = 0;
+    this.waveBreakTimer = 0;
 
-    const size = this.arena.pickRandomSize();
     const shape = this.arena.pickRandomShape();
+    const size = type === PATH_TYPES.WAVES ? ROOM_SIZES.xlarge : this.arena.pickRandomSize();
     this.arena.build(size, shape);
 
     if (type === PATH_TYPES.BOSS) {
@@ -180,6 +212,10 @@ export class RoomManager {
     } else if (type === PATH_TYPES.COMBAT) {
       this._spawnCombatEnemies(1, 0);
       this._buildArenaHazards(0.8);
+    } else if (type === PATH_TYPES.WAVES) {
+      this.waveTotal = 3 + Math.floor(Math.random() * 3);
+      this._spawnWaveDefenseWave();
+      this._buildArenaHazards(1.1);
     }
 
     this.state = "fighting";
@@ -200,6 +236,31 @@ export class RoomManager {
     this.state = "minigame";
     this._positionPlayerSouth();
     this.onMinigameStart?.("rest");
+  }
+
+  spawnUpgradeRoom() {
+    this.clearEnemies();
+    this.hazardSystem?.clear();
+    this.arenaHazards?.clear();
+    this.currentRoomType = PATH_TYPES.UPGRADE;
+    this.isBossRoom = false;
+    this.roomScoreMultiplier = 1;
+    this.waveTotal = 0;
+    this.wavesSpawned = 0;
+    this.waveBreakTimer = 0;
+    this.arena.build(ROOM_SIZES.large, "circle");
+    this._buildArenaHazards(0);
+    this.state = "upgrade";
+    this._positionPlayerSouth();
+    this.onUpgradeRoomStart?.();
+  }
+
+  finishUpgradeRoom() {
+    this.onRoomCleared?.(this.floorsCleared + 1, 0);
+    this.floorsCleared++;
+    this.roomsSinceBoss++;
+    this.state = "clearing";
+    this.transitionTimer = 1.4;
   }
 
   spawnChanceRoom() {
@@ -315,6 +376,10 @@ export class RoomManager {
       this.spawnChanceRoom();
       return;
     }
+    if (type === PATH_TYPES.UPGRADE) {
+      this.spawnUpgradeRoom();
+      return;
+    }
     this.spawnRoom(type);
   }
 
@@ -325,6 +390,7 @@ export class RoomManager {
 
     if (this.state === "minigame") return;
     if (this.state === "chance") return;
+    if (this.state === "upgrade") return;
 
     if (this.state === "fighting") {
       if (this.bossIntroTimer <= 0) {
@@ -343,7 +409,23 @@ export class RoomManager {
         this.arenaHazards?.update(dt, player, bulletPool);
       }
 
+      if (this.currentRoomType === PATH_TYPES.WAVES && this.waveBreakTimer > 0) {
+        this.waveBreakTimer -= dt;
+        if (this.waveBreakTimer <= 0) {
+          this._spawnWaveDefenseWave();
+        }
+      }
+
       if (this.enemies.every((e) => !e.alive)) {
+        if (this.currentRoomType === PATH_TYPES.WAVES && this.wavesSpawned < this.waveTotal) {
+          if (this.waveBreakTimer <= 0) {
+            this.removeEnemyVisuals();
+            this.enemies = [];
+            this.waveBreakTimer = 2.8;
+          }
+          return;
+        }
+
         this.removeEnemyVisuals();
         const hadBoss = this.isBossRoom;
         const hadMiniboss = this.currentRoomType === PATH_TYPES.MINIBOSS;
@@ -387,6 +469,13 @@ export class RoomManager {
       return "Bonus vault — beat the minigame to claim loot";
     }
     if (this.state === "chance") return "Oracle shrine — fate awaits…";
+    if (this.state === "upgrade") return "Relic vault — choose your blessing";
+    if (this.currentRoomType === PATH_TYPES.WAVES && this.state === "fighting") {
+      if (this.waveBreakTimer > 0) {
+        return `Wave ${Math.min(this.wavesSpawned + 1, this.waveTotal)} incoming…`;
+      }
+      return `Horde · Wave ${this.wavesSpawned}/${this.waveTotal}`;
+    }
     if (this.state === "clearing") {
       if (this.currentRoomType === PATH_TYPES.MINIGAME) {
         if (this.bonusOutcome === "failed") return "Vault sealed — minigame failed";
@@ -406,6 +495,8 @@ export class RoomManager {
       }
       if (this.currentRoomType === PATH_TYPES.MINIBOSS) return "Miniboss Down!";
       if (this.currentRoomType === PATH_TYPES.HARD) return "Hard room clear · 2× score!";
+      if (this.currentRoomType === PATH_TYPES.WAVES) return "Horde cleared!";
+      if (this.currentRoomType === PATH_TYPES.UPGRADE) return "Relic claimed!";
       return "Room Clear!";
     }
     if (this.state === "pathSelect") return "Choose your path...";
@@ -418,7 +509,13 @@ export class RoomManager {
   }
 
   isPaused() {
-    return this.state === "pathSelect" || this.state === "shop" || this.state === "minigame" || this.state === "chance";
+    return (
+      this.state === "pathSelect" ||
+      this.state === "shop" ||
+      this.state === "minigame" ||
+      this.state === "chance" ||
+      this.state === "upgrade"
+    );
   }
 
   isBossIntro() {

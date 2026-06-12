@@ -1,8 +1,12 @@
 # Bullet Hell 3D
 
-A top-down 3D bullet hell game built with Three.js and Vite.
+A top-down 3D bullet hell roguelike built with Three.js and Vite.
 
-## Play
+## Play online
+
+**[Play on GitHub Pages](https://ecaffrey-oss.github.io/3dbullethell/)**
+
+## Play locally
 
 ```bash
 npm install
@@ -16,24 +20,25 @@ Open the URL shown in the terminal (usually http://localhost:5173).
 - **WASD / Arrow keys** — Move
 - **Mouse** — Aim
 - **Hold click or Space** — Shoot
+- **E** — Ability
+- **Shift+1–9** — Switch weapon (during a run)
+- **P** — Pause
 
 ## Gameplay
 
-Clear each room by destroying all enemies. Avoid enemy bullets and body collisions. You have 3 hearts with brief invincibility after each hit. Five handcrafted rooms ramp up in difficulty, then endless procedurally generated rooms continue the challenge.
+Clear combat rooms, choose paths on the map, bank score between runs, and spend it on skills, weapons, abilities, and relics. Suspend a run and continue later from the save profile.
 
-### Enemy types
+Features include boss fights, shops, challenge runs, combo streaks, enemy debris, and more.
 
-- **Grunt** (red cube) — chases you and fires aimed shots
-- **Turret** (orange cylinder) — stationary, fires radial bullet bursts
-- **Spinner** (purple octahedron) — orbits and fires spiral patterns
+## Deploy to GitHub Pages
 
-### Boss (Room 5)
+```bash
+npm run deploy
+```
 
-A three-phase boss fight:
+Then in the repo on GitHub: **Settings → Pages → Deploy from branch → `gh-pages`**.
 
-- **Phase 1** — Double ring bursts of bullets
-- **Phase 2** — Multi-arm spiral patterns plus occasional rings
-- **Phase 3** — Targeted laser (telegraphed charge, then sweeping beam) with spiral shots between volleys
+Live URL: `https://ecaffrey-oss.github.io/3dbullethell/`
 
 ## Build
 

@@ -6,6 +6,7 @@ export function getWeapon(id) {
 
 export function isWeaponUnlocked(weapon, meta) {
   if (!weapon) return false;
+  if (meta.hasUnlock(weapon.id)) return true;
   if (weapon.unlock === "default") return true;
   if (weapon.unlock === "floor") return (meta.maxFloorsCleared ?? 0) >= weapon.unlockFloor;
   if (weapon.unlock === "score") return (meta.bankScore ?? 0) >= weapon.unlockScore;
@@ -309,6 +310,37 @@ export const WEAPONS = {
             color: 0xff2266,
             width: 0.14,
             life: 0.1,
+          })
+        ) {
+          fired = true;
+        }
+      }
+      return fired;
+    },
+  },
+  shard_storm: {
+    id: "shard_storm",
+    name: "Shard Storm",
+    description: "Triple homing shards — Hard Mode reward",
+    unlock: "unlockable",
+    unlockId: "shard_storm",
+    fireRate: 0.1,
+    multishot: true,
+    damage: 1,
+    speed: 26,
+    drawbacks: {},
+    fire(x, z, dirX, dirZ, bulletPool, damage, speed, opts) {
+      const base = Math.atan2(dirX, dirZ);
+      let fired = false;
+      for (const o of [-0.22, 0, 0.22]) {
+        const a = base + o;
+        if (
+          bulletPool.spawnPlayerBullet(x, z, Math.sin(a), Math.cos(a), speed, damage, {
+            ...opts,
+            homing: true,
+            homingStrength: 5,
+            color: 0xcc66ff,
+            friendlyShape: "diamond",
           })
         ) {
           fired = true;

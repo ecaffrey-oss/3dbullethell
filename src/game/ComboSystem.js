@@ -1,19 +1,23 @@
 export const COMBO_MAX = 5;
-export const COMBO_IDLE_SEC = 5;
+export const COMBO_IDLE_SEC = 6;
+export const COMBO_KILL_GAIN = 0.5;
 
 /** Kill streak — scales sim speed, damage, fire rate, and squish pitch up to 5x. */
 export class ComboSystem {
   constructor() {
     this.level = 0;
     this.idleTimer = 0;
+    this.shakePulse = 0;
   }
 
   onKill() {
-    this.level = Math.min(COMBO_MAX, this.level + 1);
+    this.level = Math.min(COMBO_MAX, this.level + COMBO_KILL_GAIN);
     this.idleTimer = COMBO_IDLE_SEC;
+    this.shakePulse = 0.4;
   }
 
   update(dt) {
+    if (this.shakePulse > 0) this.shakePulse -= dt;
     if (this.level <= 0) return;
     this.idleTimer -= dt;
     if (this.idleTimer <= 0) this.reset();
@@ -22,10 +26,20 @@ export class ComboSystem {
   reset() {
     this.level = 0;
     this.idleTimer = 0;
+    this.shakePulse = 0;
   }
 
   get active() {
     return this.level > 0;
+  }
+
+  get intensity() {
+    return Math.max(0, Math.min(1, this.level / COMBO_MAX));
+  }
+
+  get displayLabel() {
+    const rounded = Math.round(this.level * 2) / 2;
+    return Number.isInteger(rounded) ? `${rounded}x` : `${rounded.toFixed(1)}x`;
   }
 
   /** 1 → 2 at max combo */

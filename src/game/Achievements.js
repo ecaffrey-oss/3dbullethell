@@ -67,9 +67,33 @@ export const ACHIEVEMENTS = [
   {
     id: "hard_mode",
     name: "Masochist",
-    desc: "Clear 3 hard rooms in one run",
+    desc: "Clear 3 hard path rooms in one run",
     reward: "relic_thorns",
     check: (ctx) => ctx.runHardClears >= 3,
+  },
+  {
+    id: "hard_mode_initiate",
+    name: "Trial by Fire",
+    desc: "Reach floor 8 with Hard Mode enabled",
+    reward: "relic_painforge",
+    requiresHardMode: true,
+    check: (ctx) => ctx.hardModeRun && ctx.runFloors >= 8,
+  },
+  {
+    id: "hard_mode_boss",
+    name: "Boss Breaker (Hard)",
+    desc: "Defeat a boss with Hard Mode enabled",
+    reward: "shard_storm",
+    requiresHardMode: true,
+    check: (ctx) => ctx.hardModeRun && ctx.runBosses >= 1,
+  },
+  {
+    id: "hard_mode_unbroken",
+    name: "Unbroken",
+    desc: "Clear 4 combat rooms without damage on Hard Mode",
+    reward: "ability_bloodlust",
+    requiresHardMode: true,
+    check: (ctx) => ctx.hardModeRun && ctx.bestFlawlessStreak >= 4,
   },
   {
     id: "fortress",
@@ -104,6 +128,7 @@ export function evaluateAchievements(meta, ctx) {
   const newlyUnlocked = [];
   for (const ach of ACHIEVEMENTS) {
     if (meta.hasAchievement(ach.id)) continue;
+    if (ach.requiresHardMode && !ctx.hardModeRun) continue;
     if (!ach.check(ctx)) continue;
     meta.unlockAchievement(ach.id);
     grantUnlocksForSource(meta, "achievement", ach.id);
@@ -134,7 +159,13 @@ export function getAchievementProgress(ach, meta, lifetime = {}) {
     case "million_damage":
       return { done: false, label: "500 kills in one run" };
     case "hard_mode":
-      return { done: false, label: "3 hard rooms in one run" };
+      return { done: false, label: "3 hard path rooms in one run" };
+    case "hard_mode_initiate":
+      return { done: false, label: `Best floor ${meta.maxFloorsCleared}/8 (Hard Mode run)` };
+    case "hard_mode_boss":
+      return { done: false, label: "Defeat a boss on Hard Mode" };
+    case "hard_mode_unbroken":
+      return { done: false, label: "4 flawless rooms on Hard Mode" };
     case "fortress":
       return { done: false, label: `Best floor ${meta.maxFloorsCleared}/12` };
     case "veteran":

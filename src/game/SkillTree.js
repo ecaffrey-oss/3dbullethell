@@ -141,7 +141,7 @@ export const SKILLS = [
     id: "pierce_meta",
     name: "Piercing Mind",
     description: "+1 pierce on start",
-    cost: 2800,
+    cost: 6200,
     maxLevel: 1,
     costScale: 1,
     row: 5,
@@ -153,7 +153,7 @@ export const SKILLS = [
     id: "ricochet_meta",
     name: "Ricochet Mind",
     description: "Start with bouncing shots",
-    cost: 2550,
+    cost: 5800,
     maxLevel: 1,
     costScale: 1,
     row: 5,
@@ -165,7 +165,7 @@ export const SKILLS = [
     id: "homing_meta",
     name: "Seeker Mind",
     description: "Bullets home from run start",
-    cost: 2600,
+    cost: 6000,
     maxLevel: 1,
     costScale: 1,
     row: 5,
@@ -177,7 +177,7 @@ export const SKILLS = [
     id: "aoe_meta",
     name: "Blast Radius",
     description: "Start with AOE shots",
-    cost: 2500,
+    cost: 5500,
     maxLevel: 1,
     costScale: 1,
     row: 5,
@@ -208,6 +208,121 @@ export const SKILLS = [
     col: 4,
     requires: ["ability_haste"],
   },
+  {
+    id: "bulwark",
+    name: "Bulwark",
+    description: "+1 max heart",
+    cost: 3200,
+    maxLevel: 1,
+    costScale: 1,
+    row: 7,
+    col: 0,
+    requires: ["health"],
+  },
+  {
+    id: "overcharge",
+    name: "Overcharge",
+    description: "+0.35 bullet damage",
+    cost: 3400,
+    maxLevel: 2,
+    costScale: 2.0,
+    row: 7,
+    col: 1,
+    requires: ["damage"],
+  },
+  {
+    id: "capacitor",
+    name: "Capacitor",
+    description: "+6% fire rate",
+    cost: 3100,
+    maxLevel: 2,
+    costScale: 1.9,
+    row: 7,
+    col: 2,
+    requires: ["firerate"],
+  },
+  {
+    id: "steady_eye",
+    name: "Steady Eye",
+    description: "+6% crit chance",
+    cost: 3300,
+    maxLevel: 2,
+    costScale: 2.0,
+    row: 7,
+    col: 3,
+    requires: ["crit"],
+  },
+  {
+    id: "flux_weave",
+    name: "Flux Weave",
+    description: "+6% move speed",
+    cost: 3000,
+    maxLevel: 2,
+    costScale: 1.9,
+    row: 7,
+    col: 4,
+    requires: ["speed"],
+  },
+  {
+    id: "unlock_rail",
+    name: "Rail License",
+    description: "Permanently unlock Rail weapon",
+    cost: 4200,
+    maxLevel: 1,
+    costScale: 1,
+    row: 8,
+    col: 0,
+    requires: ["damage"],
+    grantUnlock: "rail",
+  },
+  {
+    id: "unlock_beam",
+    name: "Beam License",
+    description: "Permanently unlock Beam weapon",
+    cost: 4800,
+    maxLevel: 1,
+    costScale: 1,
+    row: 8,
+    col: 1,
+    requires: ["capacitor"],
+    grantUnlock: "beam",
+  },
+  {
+    id: "unlock_shotgun",
+    name: "Shotgun License",
+    description: "Permanently unlock Shotgun weapon",
+    cost: 5500,
+    maxLevel: 1,
+    costScale: 1,
+    row: 8,
+    col: 2,
+    requires: ["overcharge"],
+    grantUnlock: "shotgun",
+  },
+  {
+    id: "unlock_storm",
+    name: "Storm License",
+    description: "Permanently unlock Storm weapon",
+    cost: 7500,
+    maxLevel: 1,
+    costScale: 1,
+    row: 8,
+    col: 3,
+    requires: ["steady_eye"],
+    grantUnlock: "storm",
+  },
+  {
+    id: "unlock_cluster",
+    name: "Cluster License",
+    description: "Permanently unlock Cluster weapon",
+    cost: 6200,
+    maxLevel: 1,
+    costScale: 1,
+    row: 8,
+    col: 4,
+    requires: ["bulwark"],
+    grantUnlock: "cluster",
+  },
 ];
 
 export function getSkillCost(skill, level) {
@@ -227,13 +342,21 @@ export function getSkillBonuses(meta) {
   const surge = meta.getSkillLevel("surge");
   const abilityHaste = meta.getSkillLevel("ability_haste");
   const focusCore = meta.getSkillLevel("focus_core");
+  const bulwark = meta.getSkillLevel("bulwark");
+  const overcharge = meta.getSkillLevel("overcharge");
+  const capacitor = meta.getSkillLevel("capacitor");
+  const steadyEye = meta.getSkillLevel("steady_eye");
+  const fluxWeave = meta.getSkillLevel("flux_weave");
 
   return {
-    maxHealthBonus: health + (capstone > 0 ? 1 : 0),
-    speedMult: 1 + speed * 0.1 + dodge * 0.05,
-    fireRateMult: 1 + firerate * 0.08,
-    damageBonus: damage * 0.5 + (capstone > 0 ? 1 : 0),
-    critChance: meta.getSkillLevel("crit") * 0.05 + meta.getSkillLevel("crit2") * 0.08,
+    maxHealthBonus: health + bulwark + (capstone > 0 ? 1 : 0),
+    speedMult: 1 + speed * 0.1 + dodge * 0.05 + fluxWeave * 0.06,
+    fireRateMult: 1 + firerate * 0.08 + capacitor * 0.06,
+    damageBonus: damage * 0.5 + overcharge * 0.35 + (capstone > 0 ? 1 : 0),
+    critChance:
+      meta.getSkillLevel("crit") * 0.05 +
+      meta.getSkillLevel("crit2") * 0.08 +
+      steadyEye * 0.06,
     lifestealChance: lifesteal * 0.07,
     invincibleBonus: evasion * 0.12,
     startPierce: meta.getSkillLevel("pierce_meta") > 0 ? 1 : 0,
@@ -268,7 +391,7 @@ function skillUnlocked(meta, skill) {
 }
 
 const TREE_COLS = 5;
-const TREE_ROWS = 7;
+const TREE_ROWS = 9;
 const CELL_W = 100;
 const CELL_H = 72;
 
@@ -359,16 +482,23 @@ export class SkillTreeUI {
         (skill.exclusiveGroup ? " exclusive" : "");
       node.style.gridRow = skill.row + 1;
       node.style.gridColumn = skill.col + 1;
-      node.disabled = preview || !unlocked || maxed || blocked || this.meta.bankScore < cost;
+      node.disabled =
+        preview ||
+        !unlocked ||
+        maxed ||
+        blocked ||
+        this.meta.bankScore < cost ||
+        (skill.grantUnlock && (this.meta.hasUnlock(skill.grantUnlock) || level > 0));
 
       let costLabel = preview ? "???" : !unlocked ? "🔒" : maxed ? "MAX" : `${cost} pts`;
       if (blocked) costLabel = "Other path";
       if (skill.exclusiveGroup && level === 0 && !blocked && !preview) costLabel += " · pick 1";
+      if (skill.grantUnlock && level === 0 && !blocked && !preview) costLabel = `${cost} pts · unlock`;
 
       node.innerHTML = `
         <span class="skill-name">${skill.name}</span>
         <span class="skill-desc">${skill.description}</span>
-        <span class="skill-level">Lv ${level}/${skill.maxLevel}</span>
+        <span class="skill-level">${skill.grantUnlock ? (maxed || this.meta.hasUnlock(skill.grantUnlock) ? "Unlocked" : "Weapon") : `Lv ${level}/${skill.maxLevel}`}</span>
         <span class="skill-cost">${costLabel}</span>
       `;
       node.addEventListener("click", () => {
@@ -377,6 +507,9 @@ export class SkillTreeUI {
           this.meta.setExclusivePick(skill.exclusiveGroup, skill.id);
         }
         this.meta.setSkillLevel(skill.id, level + 1);
+        if (skill.grantUnlock && level === 0) {
+          this.meta.grantUnlock(skill.grantUnlock);
+        }
         this.render();
         this.onUpdate?.();
       });

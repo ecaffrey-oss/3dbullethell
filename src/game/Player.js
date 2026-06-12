@@ -6,6 +6,7 @@ import {
   ARENA_SIZE,
   INVINCIBLE_TIME,
   COLORS,
+  HARD_MODE_ENEMY_DAMAGE_MULT,
 } from "./constants.js";
 import { getWeapon, getWeaponDrawbacks } from "./Weapons.js";
 import { getSkillBonuses } from "./SkillTree.js";
@@ -37,6 +38,7 @@ export class Player {
     this.challengeMods = null;
     this.comboDamageMult = 1;
     this.comboFireRateMult = 1;
+    this.enemyDamageMult = 1;
     this.idleTimer = 0;
     this.driftAngle = Math.random() * Math.PI * 2;
     this.animTime = 0;
@@ -82,10 +84,11 @@ export class Player {
     return getWeaponDrawbacks(this.weaponId);
   }
 
-  applyRunSetup({ challengeMods = null, relicId = null } = {}) {
+  applyRunSetup({ challengeMods = null, relicId = null, hardMode = false } = {}) {
     this.challengeMods = challengeMods;
     this.challengeMaxHealth = challengeMods?.maxHealthCap ?? null;
     this.challengeDamageMult = challengeMods?.playerDamageMult ?? 1;
+    this.enemyDamageMult = hardMode ? HARD_MODE_ENEMY_DAMAGE_MULT : 1;
     if (relicId) applyRelic(relicId, this);
     this.applyWeaponPassive();
     this.maxHealth = this.getEffectiveMaxHealth();
@@ -163,6 +166,7 @@ export class Player {
       bounce: rs.bounceShots,
       bounces: 6,
       arena: this.arena,
+      enemies: this.combatEnemies,
     };
 
     if (rs.boomerangShot) {
@@ -369,7 +373,7 @@ export class Player {
 
   takeDamage(amount = 1) {
     if (this.invincibleTimer > 0 || this.abilityShieldTimer > 0 || !this.alive) return false;
-    amount *= this.getIncomingDamageMult();
+    amount *= this.getIncomingDamageMult() * (this.enemyDamageMult ?? 1);
     this.damageBuffer = (this.damageBuffer ?? 0) + amount;
     if (this.damageBuffer < 1) return false;
     const hits = Math.floor(this.damageBuffer);
@@ -387,6 +391,7 @@ export class Player {
     this.runState = createRunState();
     this.challengeMaxHealth = null;
     this.challengeDamageMult = 1;
+    this.enemyDamageMult = 1;
     this.ramCooldown = 0;
     this.damageBuffer = 0;
     this.debuffSlow = 0;

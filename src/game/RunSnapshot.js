@@ -80,6 +80,7 @@ export function deserializeMap(mapSystem, data) {
 
   mapSystem.root = rebuild(data.root, null);
   mapSystem.current = findMapNode(mapSystem.root, data.currentId) ?? mapSystem.root;
+  mapSystem.syncIdCounter?.();
 }
 
 function findMapNode(node, id) {
@@ -157,6 +158,7 @@ export function createRunSnapshot(game) {
     score: game.score,
     runAch: { ...game.runAch },
     challengeId: game.activeChallenge?.id ?? game.meta.selectedChallenge,
+    hardModeActive: !!game.hardModeActive,
     selectedAbility: game.meta.selectedAbility,
     gridColor: game.arena.gridColor ?? COLORS.grid,
     hazardIntensity: rm._lastHazardIntensity ?? 0.8,
@@ -176,6 +178,9 @@ export function createRunSnapshot(game) {
       restHealed: rm.restHealed,
       chanceOutcome: rm.chanceOutcome,
       bonusOutcome: rm.bonusOutcome,
+      waveTotal: rm.waveTotal,
+      wavesSpawned: rm.wavesSpawned,
+      waveBreakTimer: rm.waveBreakTimer,
     },
     map: serializeMap(rm.map),
     arena: {
@@ -208,6 +213,7 @@ function snapshotResumeUi(state, roomType) {
   if (state === "shop") return "shop";
   if (state === "minigame") return roomType === PATH_TYPES.REST ? "minigame-rest" : "minigame-bonus";
   if (state === "chance") return "chance";
+  if (state === "upgrade") return "upgrade";
   return null;
 }
 
@@ -219,6 +225,7 @@ export function restoreRunSnapshot(game, snapshot) {
   game.score = snapshot.score ?? 0;
   game.runAch = { ...snapshot.runAch };
   game.activeChallenge = getChallenge(snapshot.challengeId);
+  game.hardModeActive = !!snapshot.hardModeActive;
   game.shopRareUpgrade = snapshot.shopRareUpgrade ?? null;
 
   deserializeMap(rm.map, snapshot.map);
@@ -246,6 +253,7 @@ export function restoreRunSnapshot(game, snapshot) {
   player.applyRunSetup({
     challengeMods: game.activeChallenge?.mods,
     relicId: game.meta.selectedRelic,
+    hardMode: game.hardModeActive,
   });
   if (snapshot.selectedAbility != null) {
     game.meta.selectedAbility = snapshot.selectedAbility;

@@ -20,10 +20,6 @@
           </div>
           <span id="score-label" class="hud-chip">Score: 0</span>
           <span id="weapon-label" class="hud-chip">Pulse</span>
-          <div id="combo-hud" class="hud-chip combo-hud hidden">
-            <span id="combo-mult">1x</span>
-            <div id="combo-bar-track"><div id="combo-bar-fill"></div></div>
-          </div>
         </div>
         <div class="hud-bar hud-bar-sub">
           <span id="scale-label" class="hud-chip">HP ×1.0</span>
@@ -38,6 +34,12 @@
         <div id="boss-bar-track"><div id="boss-bar-fill"></div></div>
       </div>
       <div id="controls">WASD — Move · Mouse — Aim · Click — Shoot · E — Ability · Shift+1–9 — Weapon · P — Pause</div>
+    </div>
+    <div id="combo-meter" class="combo-meter hidden" aria-hidden="true">
+      <span id="combo-mult" class="combo-mult">1x</span>
+      <div id="combo-bar-track" class="combo-bar-track">
+        <div id="combo-bar-fill" class="combo-bar-fill"></div>
+      </div>
     </div>
     <canvas id="game"></canvas>
     <div id="draft-panel" class="hidden"></div>

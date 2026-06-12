@@ -16,6 +16,9 @@ export const MAX_BULLETS = 350;
 export const MAX_ENEMY_BULLETS = 260;
 export const MAX_PLAYER_BULLETS = 100;
 
+/** Global Hard Mode — enemies deal this much more damage to the player. */
+export const HARD_MODE_ENEMY_DAMAGE_MULT = 2;
+
 export const INVINCIBLE_TIME = 1.2;
 
 /** Saturated retro-arcade palette — flat, no PBR */
